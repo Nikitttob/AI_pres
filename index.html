@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Мультиассистент</title>
+<style>
+:root{--bg:#0c1117;--bg2:#151b23;--bg3:#1c2333;--bg4:rgba(255,255,255,0.06);--border:rgba(255,255,255,0.08);--text:#e0e6ed;--text2:#8899aa;--text3:#556677;--accent:#3b82f6;--accent2:#2563eb;--gold:#f59e0b;--green:#10b981;--red:#ef4444;--sidebar:240px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',-apple-system,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;overflow:hidden}
+
+/* Sidebar */
+.sidebar{width:var(--sidebar);background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;transition:transform .3s}
+.sidebar-header{padding:16px;border-bottom:1px solid var(--border)}
+.sidebar-logo{display:flex;align-items:center;gap:10px}
+.logo-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#6366f1);display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff}
+.logo-text{font-size:15px;font-weight:600;color:#f0f4f8}
+.logo-sub{font-size:11px;color:var(--text2)}
+.sidebar-modes{flex:1;overflow-y:auto;padding:8px}
+.mode-btn{width:100%;padding:12px 14px;border-radius:10px;border:none;background:transparent;color:var(--text2);cursor:pointer;font-size:13px;text-align:left;transition:all .2s;font-family:inherit;display:flex;align-items:center;gap:10px;margin-bottom:2px}
+.mode-btn:hover{background:var(--bg4);color:var(--text)}
+.mode-btn.active{background:rgba(59,130,246,.15);color:#60a5fa}
+.mode-icon{font-size:20px;width:28px;text-align:center;flex-shrink:0}
+.mode-info{overflow:hidden}
+.mode-name{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mode-desc{font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.mode-badge{font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg4);color:var(--text3);margin-left:auto;flex-shrink:0}
+.sidebar-footer{padding:12px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--text3)}
+.status-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px}
+.status-dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+.status-dot.off{background:var(--gold);box-shadow:0 0 6px var(--gold)}
+
+/* Main area */
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+
+/* Submode tabs */
+.submode-bar{padding:8px 20px;border-bottom:1px solid var(--border);background:var(--bg2);display:none;gap:6px}
+.submode-bar.show{display:flex}
+.sub-tab{padding:6px 14px;border-radius:6px;border:none;background:var(--bg4);color:var(--text2);cursor:pointer;font-size:12px;font-family:inherit;transition:all .2s}
+.sub-tab.active{background:var(--accent);color:#fff}
+
+/* Chat */
+.chat{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px}
+.chat::-webkit-scrollbar{width:6px}
+.chat::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
+
+/* Welcome */
+.welcome{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;opacity:.8}
+.welcome-icon{font-size:56px}
+.welcome-title{font-size:18px;font-weight:600;color:#f0f4f8}
+.welcome-desc{font-size:13px;color:var(--text2);text-align:center;max-width:400px;line-height:1.6}
+.examples{display:flex;flex-direction:column;gap:6px;width:100%;max-width:440px;margin-top:8px}
+.ex-btn{padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:#a0b0c0;cursor:pointer;font-size:13px;text-align:left;font-family:inherit;transition:all .2s}
+.ex-btn:hover{background:rgba(59,130,246,.1);border-color:rgba(59,130,246,.3)}
+
+/* Messages */
+.msg{display:flex}.msg.user{justify-content:flex-end}.msg.assistant{justify-content:flex-start}
+.bubble{max-width:80%;padding:12px 16px;border-radius:14px;font-size:14px;line-height:1.65;word-break:break-word}
+.msg.user .bubble{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+.msg.assistant .bubble{background:var(--bg3);color:#d0d8e0}
+.bubble strong{color:#f0f4f8}.bubble em{color:var(--text2);font-style:italic}
+.bubble p{margin:.4em 0}
+.sources-toggle{margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.src-btn{background:none;border:none;color:#60a5fa;cursor:pointer;font-size:12px;font-family:inherit}
+.src-item{padding:6px 10px;margin-top:4px;border-radius:6px;background:rgba(0,0,0,.2);font-size:12px;border-left:3px solid var(--accent)}
+.src-q{font-weight:500;color:#a0b0c0}.src-r{color:#6b7b8b;margin-top:2px}
+.offline-badge{display:inline-block;padding:2px 8px;border-radius:4px;background:rgba(245,158,11,.15);color:var(--gold);font-size:11px;margin-top:8px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.loading-text{animation:pulse 1.5s infinite}
+
+/* Input */
+.input-area{padding:12px 20px 20px;border-top:1px solid var(--border);background:var(--bg2)}
+.input-row{display:flex;gap:10px;align-items:flex-end}
+.input-field{flex:1;padding:12px 16px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:var(--bg4);color:var(--text);font-size:14px;resize:none;outline:none;font-family:inherit;line-height:1.5;max-height:120px}
+.input-field::placeholder{color:var(--text3)}
+.input-field:focus{border-color:rgba(59,130,246,.5)}
+.send-btn{width:44px;height:44px;border-radius:12px;border:none;background:var(--bg4);color:var(--text3);cursor:default;font-size:18px;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.send-btn.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;cursor:pointer}
+
+/* Mobile */
+.menu-btn{display:none;position:fixed;top:12px;left:12px;z-index:200;width:36px;height:36px;border-radius:8px;border:none;background:var(--bg3);color:var(--text);font-size:18px;cursor:pointer}
+.overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:99}
+@media(max-width:768px){
+  .sidebar{position:fixed;z-index:100;transform:translateX(-100%);height:100vh}
+  .sidebar.open{transform:translateX(0)}
+  .overlay.show{display:block}
+  .menu-btn{display:flex;align-items:center;justify-content:center}
+  .main{width:100%}
+}
+</style>
+</head>
+<body>
+
+<button class="menu-btn" onclick="toggleSidebar()">☰</button>
+<div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
+
+<!-- Sidebar -->
+<div class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo">
+      <div class="logo-icon">⚡</div>
+      <div>
+        <div class="logo-text">AI Ассистент</div>
+        <div class="logo-sub">Мультирежимный помощник</div>
+      </div>
+    </div>
+  </div>
+  <div class="sidebar-modes" id="modesList"></div>
+  <div class="sidebar-footer">
+    <span class="status-dot" id="sDot"></span>
+    <span id="sStatus">Загрузка...</span>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <div class="submode-bar" id="submodeBar"></div>
+  <div class="chat" id="chat">
+    <div class="welcome" id="welcome"></div>
+  </div>
+  <div class="input-area">
+    <div class="input-row">
+      <textarea class="input-field" id="input" rows="1" placeholder="Задайте вопрос..." onkeydown="handleKey(event)" oninput="updateBtn()"></textarea>
+      <button class="send-btn" id="sendBtn" onclick="send()">➤</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let modes=[], currentMode=null, currentSub="all", messages=[], loading=false;
+
+// ═══════════════════════════════════════════════
+// LocalStorage Memory
+// ═══════════════════════════════════════════════
+function saveChat(){
+  if(!currentMode)return;
+  try{localStorage.setItem("chat_"+currentMode.id, JSON.stringify(messages))}catch(e){}
+}
+function loadChat(){
+  if(!currentMode)return [];
+  try{return JSON.parse(localStorage.getItem("chat_"+currentMode.id))||[]}catch(e){return[]}
+}
+function saveLastMode(id){
+  try{localStorage.setItem("lastMode",id)}catch(e){}
+}
+function getLastMode(){
+  try{return localStorage.getItem("lastMode")||null}catch(e){return null}
+}
+
+async function init(){
+  try{
+    const r=await fetch("/api/modes");
+    const d=await r.json();
+    modes=d.modes;
+    document.getElementById("sDot").className=d.hasApiKey?"status-dot on":"status-dot off";
+    document.getElementById("sStatus").textContent=d.hasApiKey?"Claude API подключён":"Оффлайн-режим";
+    renderModes();
+    const last=getLastMode();
+    const startMode=modes.find(m=>m.id===last)||modes[0];
+    setMode(startMode.id);
+  }catch(e){document.getElementById("sStatus").textContent="Ошибка"}
+}
+
+function renderModes(){
+  document.getElementById("modesList").innerHTML=modes.map(m=>`
+    <button class="mode-btn" id="mbtn-${m.id}" onclick="setMode('${m.id}')">
+      <span class="mode-icon">${m.icon}</span>
+      <span class="mode-info">
+        <div class="mode-name">${m.name}</div>
+        <div class="mode-desc">${m.description.slice(0,40)}...</div>
+      </span>
+      ${m.kbSize?`<span class="mode-badge">${m.kbSize}</span>`:''}
+    </button>
+  `).join("");
+}
+
+function setMode(id){
+  currentMode=modes.find(m=>m.id===id)||modes[0];
+  currentSub="all";
+  saveLastMode(currentMode.id);
+
+  document.querySelectorAll(".mode-btn").forEach(b=>b.classList.remove("active"));
+  const btn=document.getElementById("mbtn-"+id);
+  if(btn)btn.classList.add("active");
+
+  // Submodes
+  const bar=document.getElementById("submodeBar");
+  if(currentMode.subModes&&currentMode.subModes.length>0){
+    bar.className="submode-bar show";
+    bar.innerHTML=currentMode.subModes.map(s=>
+      `<button class="sub-tab${s.id==='all'?' active':''}" onclick="setSub('${s.id}',this)">${s.label}</button>`
+    ).join("");
+  }else{bar.className="submode-bar"}
+
+  // Загрузка сохранённой истории
+  messages=loadChat();
+  if(messages.length>0){
+    renderSavedChat();
+  }else{
+    renderWelcome();
+  }
+  if(window.innerWidth<768)toggleSidebar();
+}
+
+function setSub(id,btn){
+  currentSub=id;
+  document.querySelectorAll(".sub-tab").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+}
+
+function renderWelcome(){
+  const c=document.getElementById("chat");
+  c.innerHTML=`<div class="welcome" id="welcome">
+    <div class="welcome-icon">${currentMode.icon}</div>
+    <div class="welcome-title">${currentMode.name}</div>
+    <div class="welcome-desc">${currentMode.description}</div>
+    <div class="examples">${currentMode.examples.map(e=>
+      `<button class="ex-btn" onclick="useEx(this)">→ ${e}</button>`
+    ).join("")}</div>
+  </div>`;
+}
+
+function renderSavedChat(){
+  const c=document.getElementById("chat");
+  c.innerHTML='';
+  // Добавляем индикатор памяти
+  const memDiv=document.createElement("div");
+  memDiv.style.cssText="text-align:center;padding:8px;font-size:12px;color:var(--text3)";
+  memDiv.innerHTML=`🧠 Восстановлено ${messages.length} сообщений <button onclick="clearChat()" style="background:none;border:none;color:#60a5fa;cursor:pointer;font-size:12px;font-family:inherit">Очистить</button>`;
+  c.appendChild(memDiv);
+  // Рендерим историю
+  for(const msg of messages){
+    addMsg(msg.role, msg.text, msg.sources||[], msg.offline||false, true);
+  }
+  c.scrollTop=c.scrollHeight;
+}
+
+function clearChat(){
+  messages=[];
+  saveChat();
+  renderWelcome();
+}
+
+function useEx(btn){
+  document.getElementById("input").value=btn.textContent.slice(2);
+  document.getElementById("input").focus();
+  updateBtn();
+}
+
+function handleKey(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}}
+function updateBtn(){
+  const v=document.getElementById("input").value.trim();
+  document.getElementById("sendBtn").className=v&&!loading?"send-btn active":"send-btn";
+}
+
+async function send(){
+  const inp=document.getElementById("input");
+  const text=inp.value.trim();
+  if(!text||loading)return;
+  inp.value="";updateBtn();
+
+  const w=document.getElementById("welcome");
+  if(w)w.remove();
+
+  messages.push({role:"user",text});
+  addMsg("user",text);
+  saveChat();
+
+  loading=true;updateBtn();
+  const ld=addLoading();
+
+  try{
+    const r=await fetch("/api/chat",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({message:text,modeId:currentMode.id,subMode:currentSub,history:messages.slice(-12)})
+    });
+    const d=await r.json();
+    ld.remove();
+    messages.push({role:"assistant",text:d.answer,sources:d.sources||[],offline:d.offline||false});
+    addMsg("assistant",d.answer,d.sources,d.offline);
+    saveChat();
+  }catch(e){
+    ld.remove();
+    addMsg("assistant","❌ Ошибка соединения с сервером",[],false);
+  }
+  loading=false;updateBtn();inp.focus();
+}
+
+function addMsg(role,text,sources,offline,silent){
+  const chat=document.getElementById("chat");
+  const div=document.createElement("div");
+  div.className="msg "+role;
+  let html=text.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>")
+    .replace(/_(.+?)_/g,"<em>$1</em>").replace(/\n\n/g,"</p><p>").replace(/\n/g,"<br>");
+  html="<p>"+html+"</p>";
+  let srcHtml="";
+  if(sources&&sources.length>0){
+    const id="s"+Date.now()+Math.random();
+    srcHtml=`<div class="sources-toggle"><button class="src-btn" onclick="document.getElementById('${id}').style.display=document.getElementById('${id}').style.display==='none'?'block':'none'">📎 Источники (${sources.length}) ▼</button><div id="${id}" style="display:none">${sources.map(s=>`<div class="src-item"><div class="src-q">${s.q}</div><div class="src-r">📌 ${s.r}</div></div>`).join("")}</div></div>`;
+  }
+  const offHtml=offline?'<div class="offline-badge">⚡ Оффлайн</div>':"";
+  div.innerHTML=`<div class="bubble">${html}${srcHtml}${offHtml}</div>`;
+  chat.appendChild(div);
+  if(!silent)chat.scrollTop=chat.scrollHeight;
+}
+
+function addLoading(){
+  const chat=document.getElementById("chat");
+  const div=document.createElement("div");
+  div.className="msg assistant";
+  div.innerHTML='<div class="bubble"><span class="loading-text">Формирую ответ...</span></div>';
+  chat.appendChild(div);
+  chat.scrollTop=chat.scrollHeight;
+  return div;
+}
+
+function toggleSidebar(){
+  document.getElementById("sidebar").classList.toggle("open");
+  document.getElementById("overlay").classList.toggle("show");
+}
+
+init();
+</script>
+</body>
+</html>
