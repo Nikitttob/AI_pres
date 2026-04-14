@@ -260,6 +260,8 @@ app.get("/admin", (req, res) => {
 // ═══════════════════════════════════════════════
 // TELEGRAM BOT — модульная архитектура (/bot)
 // ═══════════════════════════════════════════════
+const { flushState } = require("./bot/state");
+
 let telegramShutdown = null;
 
 if (process.env.TELEGRAM_BOT_TOKEN) {
@@ -324,6 +326,7 @@ async function gracefulShutdown(signal) {
   killTimer.unref?.();
 
   try {
+    flushState();
     if (telegramShutdown) await telegramShutdown();
   } catch (err) {
     console.error("⚠️  Ошибка остановки Telegram-бота:", err?.message || err);

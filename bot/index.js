@@ -19,6 +19,7 @@ const {
   clearHistory,
   MAX_HISTORY,
   DEFAULT_MODE,
+  flushState,
 } = require("./state");
 const { attachLogger } = require("./middleware/logger");
 const { wrap, attachGlobalErrorHandlers } = require("./middleware/errorHandler");
@@ -173,6 +174,7 @@ function startBot({ token, search, callLLM }) {
     stopping = true;
     console.log("🛑 Остановка Telegram-бота…");
     try {
+      flushState();
       if (typeof bot.stopPolling === "function") {
         await bot.stopPolling({ cancel: true });
       }
