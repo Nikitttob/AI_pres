@@ -186,7 +186,7 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
     : message;
   messages.push({ role: "user", content: userContent });
 
-  // Вызов Claude
+  // Вызов LLM (через ProviderManager — с автоматическим fallback)
   const answer = await callLLM(mode.systemPrompt, messages);
 
   if (answer) {
