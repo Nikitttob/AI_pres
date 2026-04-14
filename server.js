@@ -1,24 +1,12 @@
+// ═══════════════════════════════════════════════
+// Загрузка .env (должна выполняться ДО любого обращения к process.env)
+// ═══════════════════════════════════════════════
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
-
-// ═══════════════════════════════════════════════
-// Загрузка .env
-// ═══════════════════════════════════════════════
-const envPath = path.join(__dirname, ".env");
-if (fs.existsSync(envPath)) {
-  for (const line of fs.readFileSync(envPath, "utf-8").split("\n")) {
-    const t = line.trim();
-    if (t && !t.startsWith("#")) {
-      const eq = t.indexOf("=");
-      if (eq > 0) {
-        const k = t.slice(0, eq).trim(), v = t.slice(eq + 1).trim();
-        if (!process.env[k]) process.env[k] = v;
-      }
-    }
-  }
-}
 
 const app = express();
 
