@@ -233,6 +233,32 @@ app.get("/health", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════
+// API: Панель управления базой знаний (/api/knowledge)
+// ═══════════════════════════════════════════════
+const { createKnowledgeRouter } = require("./src/routes/knowledge");
+app.use(
+  "/api/knowledge",
+  createKnowledgeRouter({
+    knowledgeBases,
+    MODES,
+    llm,
+    rootDir: __dirname,
+    adminLimiter,
+  })
+);
+
+// Отдаём страницу админки. Ищем сначала public/, затем корень.
+app.get("/admin", (req, res) => {
+  const candidates = [
+    path.join(__dirname, "public", "admin.html"),
+    path.join(__dirname, "admin.html"),
+  ];
+  const file = candidates.find((p) => fs.existsSync(p));
+  if (file) return res.sendFile(file);
+  res.status(404).send("admin.html не найден");
+});
+
+// ═══════════════════════════════════════════════
 // TELEGRAM BOT — модульная архитектура (/bot)
 // ═══════════════════════════════════════════════
 let telegramShutdown = null;

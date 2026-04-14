@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KB Admin — База знаний</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --bg-2: #151922;
+    --bg-3: #1d2230;
+    --border: #252b3a;
+    --fg: #e6e8ee;
+    --fg-muted: #8a93a6;
+    --accent: #5a8dee;
+    --accent-2: #3e6fd1;
+    --danger: #e05a5a;
+    --ok: #4ec28d;
+    --warn: #e0b84d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  button, input, textarea, select {
+    font-family: inherit; font-size: inherit; color: inherit;
+  }
+  button {
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #262d3d; border-color: #30384a; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-2); }
+  button.danger { background: transparent; border-color: #50262c; color: var(--danger); }
+  button.danger:hover { background: #2a181b; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  input[type=text], input[type=password], textarea, select {
+    width: 100%;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 11px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 100px; font-family: inherit; }
+  label { display: block; font-size: 12px; color: var(--fg-muted); margin-bottom: 4px; }
+
+  /* ── Layout ──────────────────────────────── */
+  #login-screen {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+  }
+  .login-box {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 32px;
+    width: min(400px, 90vw);
+  }
+  .login-box h1 { margin: 0 0 6px; font-size: 20px; }
+  .login-box p { color: var(--fg-muted); margin: 0 0 20px; font-size: 13px; }
+  .login-box .field { margin-bottom: 14px; }
+  .login-box .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 18px; }
+
+  #app { display: none; height: 100vh; flex-direction: row; }
+  #app.active { display: flex; }
+
+  aside {
+    width: 280px;
+    background: var(--bg-2);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    flex-shrink: 0;
+  }
+  aside header {
+    padding: 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  aside header h2 { margin: 0; font-size: 15px; font-weight: 600; }
+  aside header .logout {
+    background: transparent; border: none; color: var(--fg-muted); padding: 2px 6px;
+    font-size: 12px;
+  }
+  aside header .logout:hover { color: var(--danger); }
+  .bases { flex: 1; overflow-y: auto; padding: 8px; }
+  .base-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 2px;
+  }
+  .base-item:hover { background: var(--bg-3); }
+  .base-item.active { background: var(--bg-3); border: 1px solid var(--border); }
+  .base-item .icon { font-size: 18px; }
+  .base-item .name { flex: 1; font-weight: 500; }
+  .base-item .count {
+    color: var(--fg-muted); font-size: 11px;
+    background: var(--bg); padding: 2px 8px; border-radius: 10px;
+  }
+
+  main {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  main > .topbar {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    background: var(--bg-2);
+  }
+  main > .topbar h1 { margin: 0; font-size: 16px; font-weight: 600; flex-shrink: 0; }
+  main > .topbar .spacer { flex: 1; }
+  main > .topbar .search { flex: 1; max-width: 380px; min-width: 180px; }
+  main > .topbar .count { color: var(--fg-muted); font-size: 13px; }
+
+  .tabs { display: flex; gap: 2px; padding: 10px 20px 0; background: var(--bg-2); border-bottom: 1px solid var(--border); }
+  .tabs button {
+    background: transparent; border: none; border-bottom: 2px solid transparent;
+    border-radius: 0; padding: 10px 16px; color: var(--fg-muted);
+  }
+  .tabs button:hover { color: var(--fg); background: transparent; }
+  .tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
+
+  .panel { flex: 1; overflow-y: auto; padding: 20px; }
+  .panel.hidden { display: none; }
+
+  /* ── Form cards ──────────────────────────── */
+  .form-card {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    max-width: 820px;
+    margin: 0 auto 20px;
+  }
+  .form-card h3 { margin: 0 0 6px; font-size: 15px; }
+  .form-card .hint { color: var(--fg-muted); font-size: 12px; margin-bottom: 16px; }
+  .form-card .field { margin-bottom: 14px; }
+  .form-card .actions { display: flex; gap: 10px; align-items: center; }
+  .form-card .status { color: var(--fg-muted); font-size: 13px; margin-left: auto; }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--danger); }
+
+  /* ── Records list ────────────────────────── */
+  .records { display: flex; flex-direction: column; gap: 10px; max-width: 980px; margin: 0 auto; }
+  .record {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .record header {
+    display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px;
+  }
+  .record header .idx {
+    color: var(--fg-muted); font-size: 11px;
+    font-family: "SF Mono", Consolas, monospace;
+    background: var(--bg-3); padding: 2px 6px; border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .record .q { font-weight: 600; flex: 1; }
+  .record .a {
+    color: #c9cdd6; white-space: pre-wrap;
+    margin: 6px 0 8px;
+  }
+  .record .meta {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 12px; color: var(--fg-muted);
+    padding-top: 8px; border-top: 1px solid var(--border);
+  }
+  .record .meta .src { flex: 1; word-break: break-word; }
+  .record .del {
+    padding: 4px 10px; font-size: 12px;
+  }
+
+  .empty {
+    text-align: center; color: var(--fg-muted);
+    padding: 60px 20px;
+  }
+
+  /* ── Generated preview ───────────────────── */
+  .gen-preview {
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+    margin-top: 14px;
+    font-size: 13px;
+  }
+  .gen-preview .item {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .gen-preview .item:last-child { border-bottom: none; }
+  .gen-preview .q { font-weight: 600; margin-bottom: 4px; }
+  .gen-preview .a { color: #bbc2cf; white-space: pre-wrap; }
+
+  .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid var(--fg-muted); border-top-color: transparent;
+    border-radius: 50%; animation: spin .8s linear infinite;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 720px) {
+    aside { width: 200px; }
+    .panel { padding: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════ Экран авторизации ═══════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <h1>Панель управления базой знаний</h1>
+    <p>Введите Bearer-токен (переменная <code>ADMIN_TOKEN</code> из .env)</p>
+    <div class="field">
+      <label for="token-input">Токен</label>
+      <input type="password" id="token-input" autocomplete="off" placeholder="sk-..." />
+    </div>
+    <button class="primary" id="login-btn" style="width: 100%;">Войти</button>
+    <div class="err" id="login-err"></div>
+  </div>
+</div>
+
+<!-- ═══════════ Основное приложение ═══════════ -->
+<div id="app">
+  <aside>
+    <header>
+      <h2>Базы знаний</h2>
+      <button class="logout" id="logout-btn" title="Выйти">выход</button>
+    </header>
+    <div class="bases" id="bases-list"></div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <h1 id="current-base-name">Выберите базу</h1>
+      <span class="count" id="current-count"></span>
+      <div class="spacer"></div>
+      <input type="text" class="search" id="search-input" placeholder="Поиск по вопросам и ответам..." />
+    </div>
+
+    <div class="tabs">
+      <button class="active" data-tab="list">Записи</button>
+      <button data-tab="manual">+ Вручную</button>
+      <button data-tab="ai">+ Через AI</button>
+    </div>
+
+    <!-- Список записей -->
+    <div class="panel" id="panel-list">
+      <div class="records" id="records"></div>
+    </div>
+
+    <!-- Форма ручного добавления -->
+    <div class="panel hidden" id="panel-manual">
+      <div class="form-card">
+        <h3>Добавить запись вручную</h3>
+        <div class="hint">Все поля, кроме «Источник», обязательны.</div>
+        <div class="field">
+          <label for="m-question">Вопрос</label>
+          <input type="text" id="m-question" placeholder="Как...?" />
+        </div>
+        <div class="field">
+          <label for="m-answer">Ответ</label>
+          <textarea id="m-answer" rows="6" placeholder="Полный ответ..."></textarea>
+        </div>
+        <div class="field">
+          <label for="m-source">Источник (необязательно)</label>
+          <input type="text" id="m-source" placeholder="ЖК РФ, ст. 161" />
+        </div>
+        <div class="actions">
+          <button class="primary" id="m-save">Добавить</button>
+          <span class="status" id="m-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Форма AI-генерации -->
+    <div class="panel hidden" id="panel-ai">
+      <div class="form-card">
+        <h3>Сгенерировать записи через Claude</h3>
+        <div class="hint">
+          Вставьте текст (статью, регламент, документ). AI разобьёт его на пары вопрос-ответ
+          и сразу добавит в базу.
+        </div>
+        <div class="field">
+          <label for="a-source">Источник по умолчанию (необязательно)</label>
+          <input type="text" id="a-source" placeholder="Название документа, статья" />
+        </div>
+        <div class="field">
+          <label for="a-text">Текст</label>
+          <textarea id="a-text" rows="12" placeholder="Вставьте сюда текст для разбора..."></textarea>
+        </div>
+        <div class="actions">
+          <button class="primary" id="a-generate">Сгенерировать и добавить</button>
+          <span class="status" id="a-status"></span>
+        </div>
+        <div class="gen-preview" id="a-preview" style="display:none;"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ── State ─────────────────────────────────────
+  const state = {
+    token: localStorage.getItem("kb_admin_token") || "",
+    bases: [],
+    currentBase: null,
+    items: [],
+    search: "",
+    tab: "list",
+  };
+
+  // ── DOM helpers ───────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) =>
+    String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;",
+      '"': "&quot;", "'": "&#39;",
+    }[c]));
+
+  // ── API wrapper ───────────────────────────────
+  async function api(path, opts = {}) {
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + state.token,
+      ...(opts.headers || {}),
+    };
+    const res = await fetch("/api/knowledge" + path, { ...opts, headers });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+    if (!res.ok) {
+      const err = new Error(data.error || "HTTP " + res.status);
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
+
+  // ── Auth flow ─────────────────────────────────
+  function showLogin(errMsg) {
+    $("login-screen").style.display = "flex";
+    $("app").classList.remove("active");
+    $("login-err").textContent = errMsg || "";
+    $("token-input").value = "";
+    $("token-input").focus();
+  }
+
+  function showApp() {
+    $("login-screen").style.display = "none";
+    $("app").classList.add("active");
+  }
+
+  async function tryLogin(token) {
+    state.token = token;
+    try {
+      const data = await api("/");
+      localStorage.setItem("kb_admin_token", token);
+      state.bases = data.bases || [];
+      renderBases();
+      showApp();
+      if (state.bases.length > 0) selectBase(state.bases[0].id);
+    } catch (e) {
+      state.token = "";
+      localStorage.removeItem("kb_admin_token");
+      showLogin(e.status === 401 ? "Неверный токен" : e.message);
+    }
+  }
+
+  $("login-btn").addEventListener("click", () => {
+    const t = $("token-input").value.trim();
+    if (!t) { $("login-err").textContent = "Введите токен"; return; }
+    tryLogin(t);
+  });
+  $("token-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") $("login-btn").click();
+  });
+  $("logout-btn").addEventListener("click", () => {
+    state.token = "";
+    localStorage.removeItem("kb_admin_token");
+    showLogin();
+  });
+
+  // ── Render: боковая панель ────────────────────
+  function renderBases() {
+    const root = $("bases-list");
+    if (!state.bases.length) {
+      root.innerHTML = '<div class="empty" style="padding:20px;">Нет баз</div>';
+      return;
+    }
+    root.innerHTML = state.bases
+      .map(
+        (b) => `
+        <div class="base-item ${b.id === state.currentBase ? "active" : ""}" data-id="${esc(b.id)}">
+          <span class="icon">${esc(b.icon || "📚")}</span>
+          <span class="name">${esc(b.name)}</span>
+          <span class="count">${b.count}</span>
+        </div>`
+      )
+      .join("");
+    root.querySelectorAll(".base-item").forEach((el) => {
+      el.addEventListener("click", () => selectBase(el.dataset.id));
+    });
+  }
+
+  async function selectBase(id) {
+    state.currentBase = id;
+    const base = state.bases.find((b) => b.id === id);
+    $("current-base-name").textContent = base ? `${base.icon || ""} ${base.name}` : "";
+    renderBases();
+    await loadItems();
+    switchTab("list");
+  }
+
+  async function loadItems() {
+    if (!state.currentBase) return;
+    try {
+      const data = await api("/" + encodeURIComponent(state.currentBase));
+      state.items = data.items || [];
+      updateBaseCount(state.currentBase, data.count);
+      renderRecords();
+    } catch (e) {
+      if (e.status === 401) return showLogin("Сессия истекла");
+      $("records").innerHTML = `<div class="empty">Ошибка: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function updateBaseCount(id, count) {
+    const b = state.bases.find((x) => x.id === id);
+    if (b) b.count = count;
+    renderBases();
+    $("current-count").textContent = count + " записей";
+  }
+
+  // ── Render: записи ────────────────────────────
+  function renderRecords() {
+    const root = $("records");
+    const q = state.search.trim().toLowerCase();
+    let items = state.items;
+    if (q) {
+      items = items.filter(
+        (it) =>
+          (it.question || "").toLowerCase().includes(q) ||
+          (it.answer || "").toLowerCase().includes(q) ||
+          (it.source || "").toLowerCase().includes(q)
+      );
+    }
+    $("current-count").textContent = q
+      ? `${items.length} из ${state.items.length}`
+      : `${state.items.length} записей`;
+
+    if (!items.length) {
+      root.innerHTML = `<div class="empty">${q ? "Ничего не найдено" : "Записей пока нет"}</div>`;
+      return;
+    }
+
+    root.innerHTML = items
+      .map(
+        (it) => `
+        <div class="record" data-idx="${it.index}">
+          <header>
+            <span class="idx">#${it.index}</span>
+            <div class="q">${esc(it.question)}</div>
+          </header>
+          <div class="a">${esc(it.answer)}</div>
+          <div class="meta">
+            <span class="src">${it.source ? "📌 " + esc(it.source) : '<span style="color:var(--fg-muted)">без источника</span>'}</span>
+            <button class="danger del" data-idx="${it.index}">Удалить</button>
+          </div>
+        </div>`
+      )
+      .join("");
+
+    root.querySelectorAll(".del").forEach((btn) => {
+      btn.addEventListener("click", () => deleteRecord(parseInt(btn.dataset.idx, 10)));
+    });
+  }
+
+  async function deleteRecord(idx) {
+    if (!confirm(`Удалить запись #${idx}?`)) return;
+    try {
+      const data = await api(
+        "/" + encodeURIComponent(state.currentBase) + "/" + idx,
+        { method: "DELETE" }
+      );
+      updateBaseCount(state.currentBase, data.count);
+      await loadItems();
+    } catch (e) {
+      if (e.status === 401) return showLogin("Сессия истекла");
+      alert("Ошибка: " + e.message);
+    }
+  }
+
+  // ── Поиск ─────────────────────────────────────
+  $("search-input").addEventListener("input", (e) => {
+    state.search = e.target.value;
+    renderRecords();
+  });
+
+  // ── Вкладки ───────────────────────────────────
+  document.querySelectorAll(".tabs button").forEach((btn) => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+
+  function switchTab(tab) {
+    state.tab = tab;
+    document.querySelectorAll(".tabs button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.tab === tab);
+    });
+    document.querySelectorAll(".panel").forEach((p) => p.classList.add("hidden"));
+    $("panel-" + tab).classList.remove("hidden");
+  }
+
+  // ── Добавление вручную ────────────────────────
+  $("m-save").addEventListener("click", async () => {
+    if (!state.currentBase) return;
+    const question = $("m-question").value.trim();
+    const answer = $("m-answer").value.trim();
+    const source = $("m-source").value.trim();
+    const status = $("m-status");
+    if (!question || !answer) {
+      status.textContent = "Вопрос и ответ обязательны";
+      status.className = "status err";
+      return;
+    }
+    const btn = $("m-save");
+    btn.disabled = true;
+    status.innerHTML = '<span class="spinner"></span> Сохраняем...';
+    status.className = "status";
+    try {
+      const data = await api("/" + encodeURIComponent(state.currentBase), {
+        method: "POST",
+        body: JSON.stringify({ question, answer, source }),
+      });
+      status.textContent = "✓ Добавлено (#" + data.added.index + ")";
+      status.className = "status ok";
+      $("m-question").value = "";
+      $("m-answer").value = "";
+      $("m-source").value = "";
+      updateBaseCount(state.currentBase, data.count);
+      await loadItems();
+    } catch (e) {
+      if (e.status === 401) return showLogin("Сессия истекла");
+      status.textContent = "Ошибка: " + e.message;
+      status.className = "status err";
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── AI-генерация ──────────────────────────────
+  $("a-generate").addEventListener("click", async () => {
+    if (!state.currentBase) return;
+    const text = $("a-text").value.trim();
+    const source = $("a-source").value.trim();
+    const status = $("a-status");
+    const preview = $("a-preview");
+    if (text.length < 20) {
+      status.textContent = "Минимум 20 символов";
+      status.className = "status err";
+      return;
+    }
+    const btn = $("a-generate");
+    btn.disabled = true;
+    status.innerHTML = '<span class="spinner"></span> Отправляем в Claude...';
+    status.className = "status";
+    preview.style.display = "none";
+    preview.innerHTML = "";
+    try {
+      const data = await api(
+        "/" + encodeURIComponent(state.currentBase) + "/generate",
+        { method: "POST", body: JSON.stringify({ text, source }) }
+      );
+      status.textContent = `✓ Добавлено ${data.added} записей`;
+      status.className = "status ok";
+      preview.style.display = "block";
+      preview.innerHTML = (data.items || [])
+        .map(
+          (it) => `
+          <div class="item">
+            <div class="q">#${it.index} — ${esc(it.question)}</div>
+            <div class="a">${esc(it.answer)}</div>
+            ${it.source ? `<div style="color:var(--fg-muted);font-size:12px;margin-top:4px;">📌 ${esc(it.source)}</div>` : ""}
+          </div>`
+        )
+        .join("");
+      $("a-text").value = "";
+      updateBaseCount(state.currentBase, data.count);
+      await loadItems();
+    } catch (e) {
+      if (e.status === 401) return showLogin("Сессия истекла");
+      status.textContent = "Ошибка: " + (e.data && e.data.error ? e.data.error : e.message);
+      status.className = "status err";
+      if (e.data && e.data.raw) {
+        preview.style.display = "block";
+        preview.innerHTML = `<div class="item"><div class="q">Ответ LLM (не распарсен):</div><div class="a">${esc(e.data.raw)}</div></div>`;
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── Старт ─────────────────────────────────────
+  if (state.token) tryLogin(state.token);
+  else showLogin();
+})();
+</script>
+</body>
+</html>
