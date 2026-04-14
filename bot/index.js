@@ -29,12 +29,30 @@ const { wrap, attachGlobalErrorHandlers } = require("./middleware/errorHandler")
  * @param {string} opts.token — TELEGRAM_BOT_TOKEN
  * @param {(modeId:string, query:string, subMode?:string)=>Array} opts.search
  * @param {(systemPrompt:string, messages:Array)=>Promise<string|null>} opts.callLLM
+ * @param {string|null} [opts.webhookUrl] — публичный base URL для webhook
+ * @param {import('express').Express} [opts.app] — экземпляр express-приложения
  * @returns {{ bot: TelegramBot, shutdown: ()=>Promise<void> }}
  */
-function startBot({ token, search, callLLM }) {
+function startBot({ token, search, callLLM, webhookUrl = null, app = null }) {
   if (!token) throw new Error("startBot: требуется TELEGRAM_BOT_TOKEN");
 
-  const bot = new TelegramBot(token, { polling: true });
+  const webhookPath = `/bot${token}`;
+  const webhookMode = Boolean(webhookUrl && app);
+  const bot = webhookMode
+    ? new TelegramBot(token)
+    : new TelegramBot(token, { polling: true });
+
+  if (webhookMode) {
+    bot.setWebHook(`${webhookUrl}${webhookPath}`);
+    app.post(webhookPath, (req, res) => {
+      bot.processUpdate(req.body);
+      res.sendStatus(200);
+    });
+    console.log(`🔗 Telegram-бот запущен в webhook-режиме: ${webhookUrl}${webhookPath}`);
+  } else {
+    bot.deleteWebHook().catch(() => {});
+    console.log("📡 Telegram-бот запущен в polling-режиме");
+  }
 
   // 1) Middleware: логирование + глобальные обработчики ошибок
   attachLogger(bot);
@@ -175,11 +193,12 @@ function startBot({ token, search, callLLM }) {
     console.log("🛑 Остановка Telegram-бота…");
     try {
       flushState();
-      if (typeof bot.stopPolling === "function") {
+      if (webhookMode) {
+        if (typeof bot.deleteWebHook === "function") {
+          await bot.deleteWebHook().catch(() => {});
+        }
+      } else if (typeof bot.stopPolling === "function") {
         await bot.stopPolling({ cancel: true });
-      }
-      if (typeof bot.closeWebHook === "function") {
-        await bot.closeWebHook().catch(() => {});
       }
       console.log("✅ Telegram-бот остановлен");
     } catch (err) {
