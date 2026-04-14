@@ -130,6 +130,26 @@ app.get("/api/modes", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════
+// API: LLM-провайдеры (статус + переключение primary)
+// ═══════════════════════════════════════════════
+app.get("/api/llm/providers", async (req, res) => {
+  const status = await llm.status();
+  res.json({ ...status, available: Object.keys(llm.providers) });
+});
+
+app.post("/api/llm/primary", async (req, res) => {
+  const { name } = req.body || {};
+  try {
+    const newPrimary = llm.setPrimary(name);
+    const status = await llm.status();
+    console.log(`[LLM] Primary переключён → ${newPrimary}`);
+    res.json({ ok: true, primary: newPrimary, providers: status });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════
 // API: Чат (универсальный для всех режимов)
 // ═══════════════════════════════════════════════
 app.post("/api/chat", async (req, res) => {
@@ -170,7 +190,7 @@ app.post("/api/chat", async (req, res) => {
     res.json({ answer, sources: context, offline: false });
   } else {
     // Оффлайн — ни один LLM-провайдер недоступен
-    const hint = "Настройте ANTHROPIC_API_KEY или запустите Ollama (OLLAMA_HOST, OLLAMA_MODEL).";
+    const hint = "Настройте ANTHROPIC_API_KEY, GIGACHAT_CREDENTIALS или запустите Ollama (OLLAMA_HOST, OLLAMA_MODEL).";
     let offlineAnswer;
     if (mode.type === "rag" && context.length > 0) {
       offlineAnswer = "📋 **Результаты из базы знаний:**\n\n" +
@@ -242,6 +262,7 @@ const httpServer = app.listen(PORT, async () => {
   const status = await llm.status();
   const claudeIcon = status.claude ? "✅" : "❌";
   const ollamaIcon = status.ollama ? "✅" : "❌";
+  const gigaIcon = status.gigachat ? "✅" : "❌";
   const tgIcon = process.env.TELEGRAM_BOT_TOKEN ? "✅" : "❌";
   console.log("");
   console.log("╔══════════════════════════════════════════════╗");
@@ -249,7 +270,7 @@ const httpServer = app.listen(PORT, async () => {
   console.log("╠══════════════════════════════════════════════╣");
   console.log(`║  🌐 http://localhost:${PORT}                     ║`);
   console.log(`║  📚 Режимов: ${Object.keys(MODES).length}                              ║`);
-  console.log(`║  🔑 Claude: ${claudeIcon}  🦙 Ollama: ${ollamaIcon}  TG: ${tgIcon}                ║`);
+  console.log(`║  🔑 Claude: ${claudeIcon}  🦙 Ollama: ${ollamaIcon}  🟢 GigaChat: ${gigaIcon}  TG: ${tgIcon}  ║`);
   console.log(`║  🎯 LLM primary: ${status.primary.padEnd(28)}║`);
   console.log("╚══════════════════════════════════════════════╝");
   console.log("");

@@ -120,7 +120,7 @@ function createRagHandler(modeConfig, deps) {
     await sendWithFallback(
       chatId,
       `⚠️ Режим «${modeConfig.name}»: нет доступных LLM-провайдеров. ` +
-        "Настройте ANTHROPIC_API_KEY или запустите Ollama (OLLAMA_HOST, OLLAMA_MODEL).",
+        "Настройте ANTHROPIC_API_KEY, GIGACHAT_CREDENTIALS или запустите Ollama (OLLAMA_HOST, OLLAMA_MODEL).",
       { reply_markup: modeKeyboard() }
     );
     logResponse(chatId, modeId, startedAt, { ok: false, offline: true, error: llmError });
