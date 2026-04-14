@@ -21,8 +21,41 @@ if (fs.existsSync(envPath)) {
 }
 
 const app = express();
+
+// За reverse-proxy (Railway/Nginx/etc.) доверяем первому прокси,
+// чтобы req.ip корректно отражал IP клиента для rate-limiter.
+app.set("trust proxy", 1);
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+
+// ═══════════════════════════════════════════════
+// Rate limiting для API-эндпоинтов
+// ═══════════════════════════════════════════════
+const { rateLimit } = require("./src/middleware/rateLimit");
+
+// Общий лимит на все /api/* — защита от флуда
+const apiLimiter = rateLimit({
+  name: "api",
+  windowMs: 60_000,
+  max: Number(process.env.RATE_LIMIT_API_PER_MIN) || 60,
+});
+
+// Строгий лимит на LLM-запросы (дорогие операции)
+const chatLimiter = rateLimit({
+  name: "chat",
+  windowMs: 60_000,
+  max: Number(process.env.RATE_LIMIT_CHAT_PER_MIN) || 15,
+});
+
+// Отдельный лимит на админские операции
+const adminLimiter = rateLimit({
+  name: "admin",
+  windowMs: 60_000,
+  max: Number(process.env.RATE_LIMIT_ADMIN_PER_MIN) || 10,
+});
+
+app.use("/api/", apiLimiter);
 
 // Статика: ищем public/, затем корень
 const publicDir = fs.existsSync(path.join(__dirname, "public"))
@@ -137,7 +170,7 @@ app.get("/api/llm/providers", async (req, res) => {
   res.json({ ...status, available: Object.keys(llm.providers) });
 });
 
-app.post("/api/llm/primary", async (req, res) => {
+app.post("/api/llm/primary", adminLimiter, async (req, res) => {
   const { name } = req.body || {};
   try {
     const newPrimary = llm.setPrimary(name);
@@ -152,7 +185,7 @@ app.post("/api/llm/primary", async (req, res) => {
 // ═══════════════════════════════════════════════
 // API: Чат (универсальный для всех режимов)
 // ═══════════════════════════════════════════════
-app.post("/api/chat", async (req, res) => {
+app.post("/api/chat", chatLimiter, async (req, res) => {
   const { message, modeId, subMode, history } = req.body;
   if (!message) return res.status(400).json({ error: "Пустое сообщение" });
 
@@ -208,7 +241,7 @@ app.post("/api/chat", async (req, res) => {
 // ═══════════════════════════════════════════════
 // API: Поиск по базе знаний
 // ═══════════════════════════════════════════════
-app.post("/api/search", (req, res) => {
+app.post("/api/search", chatLimiter, (req, res) => {
   const { query, modeId, subMode } = req.body;
   res.json({ results: search(modeId || "zhkh", query || "", subMode || "all") });
 });
