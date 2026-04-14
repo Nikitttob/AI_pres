@@ -33,6 +33,8 @@ app.use(express.json({ limit: "1mb" }));
 // Rate limiting для API-эндпоинтов
 // ═══════════════════════════════════════════════
 const { rateLimit } = require("./src/middleware/rateLimit");
+const { validateBody } = require("./src/middleware/validate");
+const { normalizeHistory } = require("./src/utils/messages");
 
 // Общий лимит на все /api/* — защита от флуда
 const apiLimiter = rateLimit({
@@ -155,9 +157,13 @@ app.post("/api/llm/primary", adminLimiter, async (req, res) => {
 // ═══════════════════════════════════════════════
 // API: Чат (универсальный для всех режимов)
 // ═══════════════════════════════════════════════
-app.post("/api/chat", chatLimiter, async (req, res) => {
+app.post("/api/chat", chatLimiter, validateBody({
+  message: { type: "string", required: true, min: 1 },
+  modeId: { type: "string" },
+  subMode: { type: "string" },
+  history: { type: "array" },
+}), async (req, res) => {
   const { message, modeId, subMode, history } = req.body;
-  if (!message) return res.status(400).json({ error: "Пустое сообщение" });
 
   const mode = MODES[modeId] || MODES.zhkh;
   let context = [];
@@ -174,12 +180,7 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
   }
 
   // Формирование сообщений
-  const messages = [];
-  if (history && history.length > 0) {
-    for (const h of history.slice(-12)) {
-      messages.push({ role: h.role, content: h.text });
-    }
-  }
+  const messages = normalizeHistory(history, 12);
 
   const userContent = mode.type === "rag"
     ? `${contextBlock}\n\n---\nВОПРОС: ${message}`
@@ -211,7 +212,11 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
 // ═══════════════════════════════════════════════
 // API: Поиск по базе знаний
 // ═══════════════════════════════════════════════
-app.post("/api/search", chatLimiter, (req, res) => {
+app.post("/api/search", chatLimiter, validateBody({
+  query: { type: "string" },
+  modeId: { type: "string" },
+  subMode: { type: "string" },
+}), (req, res) => {
   const { query, modeId, subMode } = req.body;
   res.json({ results: search(modeId || "zhkh", query || "", subMode || "all") });
 });
