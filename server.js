@@ -159,9 +159,13 @@ const MODES = {
 };
 
 // ═══════════════════════════════════════════════
-// Загрузка баз знаний (RAG)
+// Загрузка баз знаний (RAG) + валидация + индексация
 // ═══════════════════════════════════════════════
+const { KBSearchEngine } = require("./src/kb/search");
+const { validateKB, formatReport } = require("./src/kb/validate");
+
 const knowledgeBases = {};
+const searchEngines = {};
 
 for (const [modeId, mode] of Object.entries(MODES)) {
   if (mode.type === "rag" && mode.kbFile) {
@@ -171,52 +175,42 @@ for (const [modeId, mode] of Object.entries(MODES)) {
     ];
     const kbPath = paths.find(p => fs.existsSync(p));
     if (kbPath) {
-      knowledgeBases[modeId] = JSON.parse(fs.readFileSync(kbPath, "utf-8"));
-      console.log(`📚 ${mode.name}: ${knowledgeBases[modeId].length} вопросов загружено`);
+      const data = JSON.parse(fs.readFileSync(kbPath, "utf-8"));
+      knowledgeBases[modeId] = data;
+
+      const knownSubModes = (mode.subModes || [])
+        .map(s => s.id).filter(id => id && id !== "all");
+      const report = validateKB(data, {
+        name: mode.kbFile,
+        knownSubModes: knownSubModes.length ? knownSubModes : null,
+      });
+      // Печатаем отчёт только если есть что показать
+      if (
+        report.stats.duplicates ||
+        report.stats.emptyFields ||
+        report.stats.suspiciousLinks ||
+        report.stats.unknownTags
+      ) {
+        console.log(formatReport(report));
+      }
+
+      searchEngines[modeId] = new KBSearchEngine(data, {
+        cacheSize: 200,
+        cacheTTL: 5 * 60 * 1000,
+      });
+      console.log(`📚 ${mode.name}: ${data.length} вопросов загружено (fuzzy + cache)`);
     } else {
       console.log(`⚠️  ${mode.name}: файл ${mode.kbFile} не найден`);
       knowledgeBases[modeId] = [];
+      searchEngines[modeId] = new KBSearchEngine([]);
     }
   }
 }
 
-// ═══════════════════════════════════════════════
-// Поисковый движок
-// ═══════════════════════════════════════════════
-const STOP_WORDS = new Set([
-  "и","в","на","по","с","к","о","из","за","от","для","не","что","как",
-  "это","то","при","или","но","а","его","её","их","все","был","она",
-  "он","мы","вы","ли","бы","же","ни","до","об","без","так","уже",
-  "ещё","нет","да","ст","рф","какие","какой","каков","какова","каковы"
-]);
-
-function tokenize(text) {
-  return text.toLowerCase().replace(/[«»"".,;:!?()—–\-\/\\№%]/g, " ")
-    .split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
-}
-
 function search(modeId, query, subMode = "all", topN = 5) {
-  const kb = knowledgeBases[modeId] || [];
-  const tokens = tokenize(query);
-  if (tokens.length === 0 || kb.length === 0) return [];
-
-  return kb
-    .filter(item => subMode === "all" || !item.t || item.t === subMode)
-    .map(item => {
-      const itemTokens = tokenize(item.q + " " + item.a);
-      let score = 0;
-      for (const t of tokens) {
-        for (const it of itemTokens) {
-          if (it === t) score += 3;
-          else if (it.startsWith(t) || t.startsWith(it)) score += 2;
-          else if (it.includes(t) || t.includes(it)) score += 1;
-        }
-      }
-      return { ...item, score };
-    })
-    .filter(item => item.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topN);
+  const engine = searchEngines[modeId];
+  if (!engine) return [];
+  return engine.search(query, { subMode, topN });
 }
 
 // ═══════════════════════════════════════════════
@@ -322,12 +316,15 @@ app.post("/api/search", (req, res) => {
 // ═══════════════════════════════════════════════
 app.get("/health", async (req, res) => {
   const kbStats = {};
+  const cacheStats = {};
   for (const [k, v] of Object.entries(knowledgeBases)) kbStats[k] = v.length;
+  for (const [k, e] of Object.entries(searchEngines)) cacheStats[k] = e.stats();
   const providers = await llm.status();
   res.json({
     status: "ok",
     modes: Object.keys(MODES).length,
     kb: kbStats,
+    searchCache: cacheStats,
     providers,
     uptime: process.uptime(),
   });
