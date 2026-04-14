@@ -30,3 +30,7 @@ secrets/
 
 # Telegram bot state
 /data/bot-state.json
+
+# Analytics logs
+data/analytics.jsonl
+data/analytics.jsonl.bak

@@ -5,6 +5,7 @@
 const { afterAnswerKeyboard, modeKeyboard } = require("../keyboards");
 const { getHistory, addToHistory } = require("../state");
 const { logResponse } = require("../middleware/logger");
+const { logRequest } = require("../../src/analytics/logger");
 
 /**
  * @typedef {Object} HandlerDeps
@@ -100,6 +101,14 @@ function createRagHandler(modeConfig, deps) {
         if (sources.length < 4000) await sendWithFallback(chatId, sources);
       }
       logResponse(chatId, modeId, startedAt, { ok: true, offline: false });
+      logRequest({
+        modeId,
+        provider: "unknown",
+        latencyMs: Date.now() - startedAt,
+        offline: false,
+        success: true,
+        source: "telegram",
+      });
       return;
     }
 
@@ -113,6 +122,14 @@ function createRagHandler(modeConfig, deps) {
       addToHistory(chatId, "assistant", reply);
       await sendWithFallback(chatId, reply, { reply_markup: afterAnswerKeyboard() });
       logResponse(chatId, modeId, startedAt, { ok: true, offline: true, error: llmError });
+      logRequest({
+        modeId,
+        provider: "none",
+        latencyMs: Date.now() - startedAt,
+        offline: true,
+        success: true,
+        source: "telegram",
+      });
       return;
     }
 
@@ -124,6 +141,14 @@ function createRagHandler(modeConfig, deps) {
       { reply_markup: modeKeyboard() }
     );
     logResponse(chatId, modeId, startedAt, { ok: false, offline: true, error: llmError });
+    logRequest({
+      modeId,
+      provider: "none",
+      latencyMs: Date.now() - startedAt,
+      offline: true,
+      success: false,
+      source: "telegram",
+    });
   };
 }
 
