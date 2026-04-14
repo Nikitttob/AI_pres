@@ -1,0 +1,5 @@
+.env
+.env.*
+config/secrets.json
+**/credentials*
+**/tokens*
