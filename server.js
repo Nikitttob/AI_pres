@@ -21,7 +21,11 @@ app.use(express.json({ limit: "1mb" }));
 // Rate limiting для API-эндпоинтов
 // ═══════════════════════════════════════════════
 const { rateLimit } = require("./src/middleware/rateLimit");
-const { validateBody } = require("./src/middleware/validate");
+const {
+  sanitizeString,
+  sanitizeHistory,
+  validateRequired,
+} = require("./src/middleware/validate");
 const { normalizeHistory } = require("./src/utils/messages");
 
 // Общий лимит на все /api/* — защита от флуда
@@ -145,13 +149,17 @@ app.post("/api/llm/primary", adminLimiter, async (req, res) => {
 // ═══════════════════════════════════════════════
 // API: Чат (универсальный для всех режимов)
 // ═══════════════════════════════════════════════
-app.post("/api/chat", chatLimiter, validateBody({
-  message: { type: "string", required: true, min: 1 },
-  modeId: { type: "string" },
-  subMode: { type: "string" },
-  history: { type: "array" },
-}), async (req, res) => {
-  const { message, modeId, subMode, history } = req.body;
+app.post("/api/chat", chatLimiter, async (req, res) => {
+  let message, modeId, subMode, sanitizedHistory;
+  try {
+    message = sanitizeString(req.body?.message, 8000);
+    validateRequired(message, "message");
+    modeId = sanitizeString(req.body?.modeId, 100);
+    subMode = sanitizeString(req.body?.subMode, 100);
+    sanitizedHistory = sanitizeHistory(req.body?.history, 20, 4000);
+  } catch (e) {
+    return res.status(e.statusCode || 400).json({ error: e.message });
+  }
 
   const mode = MODES[modeId] || MODES.zhkh;
   let context = [];
@@ -159,7 +167,7 @@ app.post("/api/chat", chatLimiter, validateBody({
 
   // RAG: поиск контекста
   if (mode.type === "rag") {
-    context = search(modeId, message, subMode || "all");
+    context = search(mode.id, message, subMode || "all");
     contextBlock = context.length > 0
       ? "КОНТЕКСТ ИЗ БАЗЫ ЗНАНИЙ:\n\n" + context.map((c, i) =>
           `[${i + 1}] Вопрос: ${c.q}\nОтвет: ${c.a}\nИсточник: ${c.r}`
@@ -168,7 +176,7 @@ app.post("/api/chat", chatLimiter, validateBody({
   }
 
   // Формирование сообщений
-  const messages = normalizeHistory(history, 12);
+  const messages = normalizeHistory(sanitizedHistory, 12);
 
   const userContent = mode.type === "rag"
     ? `${contextBlock}\n\n---\nВОПРОС: ${message}`
@@ -200,13 +208,11 @@ app.post("/api/chat", chatLimiter, validateBody({
 // ═══════════════════════════════════════════════
 // API: Поиск по базе знаний
 // ═══════════════════════════════════════════════
-app.post("/api/search", chatLimiter, validateBody({
-  query: { type: "string" },
-  modeId: { type: "string" },
-  subMode: { type: "string" },
-}), (req, res) => {
-  const { query, modeId, subMode } = req.body;
-  res.json({ results: search(modeId || "zhkh", query || "", subMode || "all") });
+app.post("/api/search", chatLimiter, (req, res) => {
+  const query = sanitizeString(req.body?.query, 2000);
+  const modeId = sanitizeString(req.body?.modeId, 100) || "zhkh";
+  const subMode = sanitizeString(req.body?.subMode, 100) || "all";
+  res.json({ results: search(modeId, query, subMode) });
 });
 
 // ═══════════════════════════════════════════════

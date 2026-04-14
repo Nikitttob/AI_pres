@@ -5,7 +5,7 @@ const express = require("express");
 const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
-const { validateBody } = require("../middleware/validate");
+const { sanitizeString, validateRequired } = require("../middleware/validate");
 
 /**
  * Фабрика роутера управления базами знаний.
@@ -120,23 +120,20 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
   });
 
   // ── 3) POST /api/knowledge/:base — добавить ───
-  router.post(
-    "/:base",
-    auth,
-    limiter,
-    validateBody({
-      question: { type: "string", required: true, min: 1 },
-      answer: { type: "string", required: true, min: 1 },
-      source: { type: "string" },
-      subMode: { type: "string" },
-    }),
-    async (req, res) => {
+  router.post("/:base", auth, limiter, async (req, res) => {
     const base = req.params.base;
     if (!hasBase(base)) return res.status(404).json({ error: "База не найдена" });
 
-    const { question, answer, source, subMode } = req.body || {};
-    if (!question || !answer) {
-      return res.status(400).json({ error: "Поля question и answer обязательны" });
+    let question, answer, source, subMode;
+    try {
+      question = sanitizeString(req.body?.question, 2000);
+      validateRequired(question, "question");
+      answer = sanitizeString(req.body?.answer, 10000);
+      validateRequired(answer, "answer");
+      source = sanitizeString(req.body?.source, 500);
+      subMode = sanitizeString(req.body?.subMode, 100);
+    } catch (e) {
+      return res.status(e.statusCode || 400).json({ error: e.message });
     }
 
     const entry = toStorage({ question, answer, source, subMode });
@@ -150,24 +147,22 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
 
     const idx = knowledgeBases[base].length - 1;
     res.json({ ok: true, added: toApi(entry, idx), count: knowledgeBases[base].length });
-    }
-  );
+  });
 
   // ── 4) POST /api/knowledge/:base/generate — AI ─
-  router.post(
-    "/:base/generate",
-    auth,
-    limiter,
-    validateBody({
-      text: { type: "string", required: true, min: 20 },
-      source: { type: "string" },
-    }),
-    async (req, res) => {
+  router.post("/:base/generate", auth, limiter, async (req, res) => {
     const base = req.params.base;
     if (!hasBase(base)) return res.status(404).json({ error: "База не найдена" });
 
-    const { text, source } = req.body || {};
-    if (!text || String(text).trim().length < 20) {
+    let text, source;
+    try {
+      text = sanitizeString(req.body?.text, 50000);
+      validateRequired(text, "text");
+      source = sanitizeString(req.body?.source, 500);
+    } catch (e) {
+      return res.status(e.statusCode || 400).json({ error: e.message });
+    }
+    if (text.trim().length < 20) {
       return res.status(400).json({ error: "Передайте text (минимум 20 символов)" });
     }
 
@@ -256,8 +251,7 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
       count: knowledgeBases[base].length,
       provider: "llm",
     });
-    }
-  );
+  });
 
   // ── 5) DELETE /api/knowledge/:base/:index ─────
   router.delete("/:base/:index", auth, limiter, async (req, res) => {
