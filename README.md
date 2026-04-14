@@ -2,14 +2,16 @@
 
 Мультирежимный AI-ассистент (ЖКХ, Экономика, Путешествия, Анализ рынка,
 Презентации) с поддержкой Telegram-бота, RAG по JSON-базам знаний и
-переключаемыми LLM-провайдерами: **Claude API** и **Ollama**.
+переключаемыми LLM-провайдерами: **Claude API**, **Ollama** и
+**Sber GigaChat**.
 
 ## Стек
 
 - Node.js ≥ 18 + Express
 - Telegram Bot API
-- RAG на JSON-базах (`kb_*.json`)
-- LLM-провайдеры: Anthropic Claude, Ollama (локальный)
+- RAG на JSON-базах (`data/kb_*.json`)
+- LLM-провайдеры: Anthropic Claude, Ollama (локальный), Sber GigaChat
+- Тесты: Jest
 - Деплой: Railway
 
 ## Режимы
@@ -33,16 +35,24 @@ npm start
 
 ## LLM-провайдеры и fallback
 
-Основной провайдер задаётся переменной `LLM_PROVIDER` (`claude` или
-`ollama`). Если основной недоступен — менеджер автоматически
-переключается на резервный.
+Основной провайдер задаётся переменной `LLM_PROVIDER`
+(`claude` | `ollama` | `gigachat`). Если основной недоступен — менеджер
+автоматически переключается на резервный (порядок: primary → остальные).
 
-Статус провайдеров можно посмотреть в `GET /health`:
+Primary можно менять на лету через `POST /api/llm/primary`
+(или из веб-интерфейса в сайдбаре).
+
+Статус провайдеров — `GET /health`:
 
 ```json
 {
   "status": "ok",
-  "providers": { "claude": true, "ollama": false, "primary": "claude" }
+  "providers": {
+    "claude": true,
+    "ollama": false,
+    "gigachat": false,
+    "primary": "claude"
+  }
 }
 ```
 
@@ -117,29 +127,54 @@ OLLAMA_MODEL=llama3.1:8b
 
 ```
 .
-├── server.js                     # Express + Telegram-бот
+├── server.js                     # Express API + точка входа
+├── index.html                    # веб-интерфейс (single-page)
+├── bot/                          # Telegram-бот
+│   ├── index.js                  #   точка входа: команды, callback'и, dispatch
+│   ├── modes.js                  #   конфигурация 5 режимов (system prompts, examples)
+│   ├── keyboards.js              #   inline-клавиатуры
+│   ├── state.js                  #   in-memory история и режим пользователя
+│   ├── handlers/                 #   per-mode хендлеры (createRagHandler-фабрика)
+│   └── middleware/               #   logger + errorHandler (graceful)
 ├── src/
-│   └── llm/
-│       ├── LLMProvider.js        # абстрактный класс
-│       ├── ClaudeProvider.js     # Anthropic Claude
-│       ├── OllamaProvider.js     # локальный Ollama (npm `ollama`)
-│       ├── ProviderManager.js    # fallback между провайдерами
-│       └── index.js              # фабрики getLLMProvider / getLLMManager
-├── kb_*.json                     # базы знаний для RAG
-├── index.html                    # веб-интерфейс
+│   ├── llm/
+│   │   ├── LLMProvider.js        # абстрактный класс
+│   │   ├── ClaudeProvider.js     # Anthropic Claude
+│   │   ├── OllamaProvider.js     # локальный Ollama (npm `ollama`)
+│   │   ├── GigaChatProvider.js   # Sber GigaChat (OAuth2 + REST)
+│   │   ├── ProviderManager.js    # fallback между провайдерами
+│   │   └── index.js              # фабрики getLLMProvider / getLLMManager
+│   ├── rag/search.js             # лексический скоринг по KB
+│   └── middleware/rateLimit.js   # in-memory rate-limiter для /api/*
+├── data/                         # JSON-базы знаний (~171 Q&A)
+│   └── kb_*.json
+├── tests/                        # Jest-тесты (RAG, LLM, KB)
+├── railway.json                  # конфиг деплоя
 └── .env.example
 ```
+
+## Тесты
+
+```bash
+npm test
+```
+
+Покрытие: парсинг и валидность KB, токенизация и RAG-поиск, контракт
+`LLMProvider`, fallback в `ProviderManager`, фабрики провайдеров.
 
 ## Добавление нового провайдера
 
 1. Создайте класс, наследующий `LLMProvider`, в `src/llm/`.
 2. Реализуйте `generateResponse(prompt, options)` и `isAvailable()`
    (плюс `checkAvailability()`, если нужен сетевой ping).
-3. Зарегистрируйте его в `REGISTRY` (`src/llm/index.js`) и/или
-   передайте в `ProviderManager`.
+3. Зарегистрируйте его в `REGISTRY` (`src/llm/index.js`) и в
+   `ProviderManager` (`src/llm/ProviderManager.js`).
 
 ## Ограничения
 
 - Не загружайте внутренние/конфиденциальные данные через Claude API.
-  Для таких сценариев используйте локальный Ollama.
+  Для таких сценариев используйте локальный Ollama или GigaChat
+  с корпоративным скоупом.
 - Качество ответов в режиме Ollama напрямую зависит от выбранной модели.
+- Состояние Telegram-бота (история, режим) — in-memory; при рестарте
+  обнуляется. Для продакшена нужен внешний store (Redis/SQLite).
