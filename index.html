@@ -25,8 +25,12 @@ body{font-family:'Segoe UI',-apple-system,sans-serif;background:var(--bg);color:
 .mode-name{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mode-desc{font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 .mode-badge{font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg4);color:var(--text3);margin-left:auto;flex-shrink:0}
-.sidebar-footer{padding:12px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--text3);display:flex;flex-direction:column;gap:4px}
-.status-row{display:flex;align-items:center;gap:6px}
+.sidebar-footer{padding:10px 12px;border-top:1px solid var(--border);font-size:11px;color:var(--text3);display:flex;flex-direction:column;gap:2px}
+.sidebar-footer .footer-title{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);padding:2px 4px 4px}
+.status-row{display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:6px;cursor:pointer;transition:background .15s,opacity .15s;border:none;background:transparent;color:inherit;font:inherit;text-align:left;width:100%}
+.status-row:hover:not(.disabled):not(.is-primary){background:var(--bg4)}
+.status-row.is-primary{background:rgba(59,130,246,.12);cursor:default}
+.status-row.disabled{cursor:not-allowed;opacity:.45}
 .status-row .label{flex:1}
 .status-row .primary-tag{font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(59,130,246,.2);color:#60a5fa;text-transform:uppercase}
 .status-dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
@@ -165,20 +169,50 @@ async function init(){
   }
 }
 
+const PROVIDER_LABELS={claude:"Claude API",ollama:"Ollama",gigachat:"GigaChat"};
+
 function renderProviders(p){
   const box=document.getElementById("providersStatus");
   if(!box) return;
-  const labels={claude:"Claude API",ollama:"Ollama"};
-  const keys=Object.keys(labels);
+  // Берём все известные ключи из ответа, плюс предсказуемые.
+  const keys=Array.from(new Set([
+    ...Object.keys(PROVIDER_LABELS),
+    ...Object.keys(p).filter(k=>k!=="primary"&&k!=="available")
+  ]));
   const anyOn=keys.some(k=>p[k]===true);
-  const rows=keys.map(k=>{
+  const rows=['<div class="footer-title">LLM-провайдер</div>'];
+  for(const k of keys){
     const on=p[k]===true;
     const isPrimary=p.primary===k;
+    const label=PROVIDER_LABELS[k]||k;
     const tag=isPrimary?'<span class="primary-tag">primary</span>':'';
-    return `<div class="status-row"><span class="status-dot ${on?'on':'off'}"></span><span class="label">${labels[k]}</span>${tag}</div>`;
-  });
-  if(!anyOn) rows.push('<div class="status-row"><span class="label" style="color:var(--gold)">⚡ Оффлайн-режим</span></div>');
+    const cls='status-row'+(isPrimary?' is-primary':'')+(!on&&!isPrimary?' disabled':'');
+    const title=on?(isPrimary?'Текущий primary':'Сделать primary'):'Недоступен';
+    rows.push(
+      `<button class="${cls}" title="${title}" `+
+      `${(!on&&!isPrimary)?'disabled':''} `+
+      `onclick="setPrimary('${k}')">`+
+      `<span class="status-dot ${on?'on':'off'}"></span>`+
+      `<span class="label">${label}</span>${tag}</button>`
+    );
+  }
+  if(!anyOn) rows.push('<div class="status-row" style="cursor:default"><span class="label" style="color:var(--gold)">⚡ Оффлайн-режим</span></div>');
   box.innerHTML=rows.join("");
+}
+
+async function setPrimary(name){
+  try{
+    const r=await fetch("/api/llm/primary",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name})
+    });
+    const d=await r.json();
+    if(d.ok) renderProviders(d.providers||{});
+    else alert("Не удалось переключить провайдера: "+(d.error||"unknown"));
+  }catch(e){
+    alert("Ошибка сети: "+e.message);
+  }
 }
 
 function renderModes(){
