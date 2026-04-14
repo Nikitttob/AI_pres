@@ -1,15 +1,17 @@
 const LLMProvider = require("./LLMProvider");
 const ClaudeProvider = require("./ClaudeProvider");
 const OllamaProvider = require("./OllamaProvider");
+const GigaChatProvider = require("./GigaChatProvider");
 const ProviderManager = require("./ProviderManager");
 
 /**
- * Реестр доступных провайдеров. Чтобы добавить нового (например, GigaChat),
- * достаточно создать класс-наследник LLMProvider и зарегистрировать его здесь.
+ * Реестр доступных провайдеров. Чтобы добавить нового, достаточно создать
+ * класс-наследник LLMProvider и зарегистрировать его здесь.
  */
 const REGISTRY = {
   claude: ClaudeProvider,
   ollama: OllamaProvider,
+  gigachat: GigaChatProvider,
 };
 
 let _cachedProvider = null;
@@ -73,6 +75,7 @@ module.exports = {
   LLMProvider,
   ClaudeProvider,
   OllamaProvider,
+  GigaChatProvider,
   ProviderManager,
   getLLMProvider,
   getLLMManager,

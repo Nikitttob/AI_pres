@@ -1,5 +1,6 @@
 const ClaudeProvider = require("./ClaudeProvider");
 const OllamaProvider = require("./OllamaProvider");
+const GigaChatProvider = require("./GigaChatProvider");
 
 /**
  * Менеджер LLM-провайдеров с автоматическим fallback.
@@ -22,6 +23,7 @@ class ProviderManager {
     this.providers = opts.providers || {
       claude: new ClaudeProvider(opts.claude || {}),
       ollama: new OllamaProvider(opts.ollama || {}),
+      gigachat: new GigaChatProvider(opts.gigachat || {}),
     };
 
     this._cache = new Map(); // name → { ok, ts }
@@ -66,6 +68,24 @@ class ProviderManager {
       console.warn(`[ProviderManager] ${name} не вернул ответ, fallback...`);
     }
     return { answer: null, provider: null };
+  }
+
+  /**
+   * Динамически переключает primary-провайдера. Сбрасывает кеш живости,
+   * чтобы новый primary был проверен немедленно. Бросает, если имя
+   * неизвестно.
+   * @param {string} name
+   * @returns {string} нормализованное имя нового primary
+   */
+  setPrimary(name) {
+    const key = String(name || "").toLowerCase();
+    if (!this.providers[key]) {
+      const known = Object.keys(this.providers).join(", ");
+      throw new Error(`Неизвестный провайдер: "${name}". Доступные: ${known}`);
+    }
+    this.primaryName = key;
+    this._cache.clear();
+    return key;
   }
 
   /**
