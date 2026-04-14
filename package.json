@@ -16,7 +16,8 @@
     "dotenv": "^17.4.2",
     "express": "^4.18.2",
     "node-telegram-bot-api": "^0.66.0",
-    "ollama": "^0.5.18"
+    "ollama": "^0.5.18",
+    "fuse.js": "file:vendor/fuse.js"
   },
   "devDependencies": {
     "jest": "^29.7.0"

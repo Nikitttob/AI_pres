@@ -71,6 +71,21 @@ describe("search", () => {
     expect(results[0].q).toMatch(/ремонт/i);
   });
 
+  test('fuzzy-поиск находит "капремонт" по запросу "капитальный ремонт"', () => {
+    const kb = [
+      { q: "Что такое капремонт?", a: "Капремонт — это комплекс работ по дому.", r: "ЖК РФ" },
+    ];
+    const results = search(kb, "капитальный ремонт");
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].q).toMatch(/капремонт/i);
+  });
+
+  test('поиск с опечаткой "капитлаьный ремонт" возвращает результаты', () => {
+    const results = search(mockKB, "капитлаьный ремонт");
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].q).toMatch(/ремонт/i);
+  });
+
   test("сортирует результаты по убыванию score", () => {
     const results = search(mockKB, "капитальный ремонт спецсчета");
     for (let i = 1; i < results.length; i++) {
