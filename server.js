@@ -27,6 +27,8 @@ const {
   validateRequired,
 } = require("./src/middleware/validate");
 const { normalizeHistory } = require("./src/utils/messages");
+const { logRequest } = require("./src/analytics/logger");
+const { getStats } = require("./src/analytics/reader");
 
 // Общий лимит на все /api/* — защита от флуда
 const apiLimiter = rateLimit({
@@ -183,10 +185,23 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
     : message;
   messages.push({ role: "user", content: userContent });
 
-  // Вызов Claude
-  const answer = await callLLM(mode.systemPrompt, messages);
+  // Вызов LLM
+  const startedAt = Date.now();
+  const { answer, provider } = await llm.generateResponse(messages, {
+    systemPrompt: mode.systemPrompt,
+    maxTokens: 2000,
+  });
+  const latencyMs = Date.now() - startedAt;
 
   if (answer) {
+    logRequest({
+      modeId: mode.id,
+      provider,
+      latencyMs,
+      offline: false,
+      success: true,
+      source: "web",
+    });
     res.json({ answer, sources: context, offline: false });
   } else {
     // Оффлайн — ни один LLM-провайдер недоступен
@@ -201,6 +216,14 @@ app.post("/api/chat", chatLimiter, async (req, res) => {
     } else {
       offlineAnswer = `⚠️ Режим «${mode.name}» требует LLM-провайдера. ${hint}`;
     }
+    logRequest({
+      modeId: mode.id,
+      provider: provider || "none",
+      latencyMs,
+      offline: true,
+      success: false,
+      source: "web",
+    });
     res.json({ answer: offlineAnswer, sources: context, offline: true });
   }
 });
@@ -255,6 +278,33 @@ app.get("/admin", (req, res) => {
   const file = candidates.find((p) => fs.existsSync(p));
   if (file) return res.sendFile(file);
   res.status(404).send("admin.html не найден");
+});
+
+app.get("/analytics", (req, res) => {
+  const candidates = [
+    path.join(__dirname, "public", "analytics.html"),
+    path.join(__dirname, "analytics.html"),
+  ];
+  const file = candidates.find((p) => fs.existsSync(p));
+  if (file) return res.sendFile(file);
+  res.status(404).send("analytics.html не найден");
+});
+
+function checkAdminBearer(req, res, next) {
+  const token = process.env.ADMIN_TOKEN || process.env.KB_ADMIN_TOKEN;
+  if (!token) {
+    return res.status(503).json({ error: "Панель отключена: задайте ADMIN_TOKEN в .env" });
+  }
+  const header = req.headers.authorization || "";
+  const got = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  if (got !== token) return res.status(401).json({ error: "Неверный или отсутствующий токен" });
+  next();
+}
+
+app.get("/api/analytics", checkAdminBearer, adminLimiter, (req, res) => {
+  const days = sanitizeString(req.query?.days, 10);
+  const stats = getStats(days ? Number(days) : 7);
+  res.json(stats);
 });
 
 // ═══════════════════════════════════════════════

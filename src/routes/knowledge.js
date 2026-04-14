@@ -6,6 +6,7 @@ const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
 const { sanitizeString, validateRequired } = require("../middleware/validate");
+const { logRequest } = require("../analytics/logger");
 
 /**
  * Фабрика роутера управления базами знаний.
@@ -183,16 +184,35 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
       `\nТЕКСТ:\n${text}`;
 
     let raw;
+    let provider = "none";
+    const startedAt = Date.now();
     try {
       const resp = await llm.generateResponse(
         [{ role: "user", content: userMsg }],
         { systemPrompt, maxTokens: 4000 }
       );
       raw = resp && resp.answer;
+      provider = (resp && resp.provider) || "none";
     } catch (e) {
+      logRequest({
+        modeId: base,
+        provider,
+        latencyMs: Date.now() - startedAt,
+        offline: true,
+        success: false,
+        source: "admin",
+      });
       return res.status(502).json({ error: "LLM ошибка: " + e.message });
     }
     if (!raw) {
+      logRequest({
+        modeId: base,
+        provider,
+        latencyMs: Date.now() - startedAt,
+        offline: true,
+        success: false,
+        source: "admin",
+      });
       return res.status(502).json({ error: "Ни один LLM-провайдер не вернул ответ" });
     }
 
@@ -244,12 +264,21 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
       return res.status(500).json({ error: "Не удалось сохранить файл: " + e.message });
     }
 
+    logRequest({
+      modeId: base,
+      provider,
+      latencyMs: Date.now() - startedAt,
+      offline: false,
+      success: true,
+      source: "admin",
+    });
+
     res.json({
       ok: true,
       added: added.length,
       items: added,
       count: knowledgeBases[base].length,
-      provider: "llm",
+      provider,
     });
   });
 

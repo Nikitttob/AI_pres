@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Analytics Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --bg-2: #151922;
+    --bg-3: #1d2230;
+    --border: #252b3a;
+    --fg: #e6e8ee;
+    --fg-muted: #8a93a6;
+    --accent: #5a8dee;
+    --accent-2: #3e6fd1;
+    --ok: #4ec28d;
+    --warn: #e0b84d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--fg); }
+  button, input { font: inherit; color: inherit; }
+  #login-screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); }
+  .login-box { width: min(420px, 92vw); background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 24px; }
+  .login-box h1 { margin: 0 0 8px; font-size: 20px; }
+  .login-box p { color: var(--fg-muted); margin: 0 0 16px; }
+  .login-box input { width: 100%; background: var(--bg-3); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
+  .login-box button { margin-top: 12px; width: 100%; }
+  .err { margin-top: 10px; min-height: 18px; color: #e05a5a; }
+
+  #app { display: none; min-height: 100vh; padding: 18px; max-width: 1200px; margin: 0 auto; }
+  #app.active { display: block; }
+  .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .topbar h1 { margin: 0; font-size: 22px; }
+  .spacer { flex: 1; }
+  input, button, select {
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+  }
+  button { cursor: pointer; }
+  button:hover { background: #262d3d; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  button.primary:hover { background: var(--accent-2); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .card { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .card .label { font-size: 12px; color: var(--fg-muted); margin-bottom: 6px; }
+  .card .value { font-size: 24px; font-weight: 700; }
+
+  .panel { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 16px; }
+  .chart { display: flex; align-items: flex-end; gap: 8px; height: 220px; padding: 8px; background: var(--bg-3); border-radius: 6px; overflow-x: auto; }
+  .bar-wrap { min-width: 72px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .bar { width: 42px; background: linear-gradient(180deg, #79a8ff, #476ec7); border-radius: 6px 6px 0 0; position: relative; }
+  .bar-label { margin-top: 8px; font-size: 11px; color: var(--fg-muted); }
+  .bar-value { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--fg); }
+
+  .tables { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--fg-muted); font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="login-screen">
+  <div class="login-box">
+    <h1>Аналитика запросов</h1>
+    <p>Введите Bearer-токен (<code>ADMIN_TOKEN</code>)</p>
+    <input type="password" id="token-input" placeholder="sk-..." autocomplete="off" />
+    <button id="login-btn" class="primary">Войти</button>
+    <div class="err" id="login-error"></div>
+  </div>
+</div>
+
+<div id="app">
+  <div class="topbar">
+    <h1>Analytics Dashboard</h1>
+    <div class="spacer"></div>
+    <label for="days-input">Дней:</label>
+    <input id="days-input" type="number" min="1" max="365" value="7" style="width:88px" />
+    <button id="refresh-btn" class="primary">Обновить</button>
+    <button id="logout-btn">Выйти</button>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">Всего запросов</div><div class="value" id="m-total">0</div></div>
+    <div class="card"><div class="label">Средняя латентность (мс)</div><div class="value" id="m-latency">0</div></div>
+    <div class="card"><div class="label">Offline rate</div><div class="value" id="m-offline">0%</div></div>
+    <div class="card"><div class="label">Success rate</div><div class="value" id="m-success">0%</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Запросы по дням</h2>
+    <div class="chart" id="chart"></div>
+  </div>
+
+  <div class="tables">
+    <div class="panel">
+      <h2>По режимам</h2>
+      <table><thead><tr><th>Режим</th><th>Запросы</th></tr></thead><tbody id="modes-table"></tbody></table>
+    </div>
+    <div class="panel">
+      <h2>По провайдерам</h2>
+      <table><thead><tr><th>Провайдер</th><th>Запросы</th></tr></thead><tbody id="providers-table"></tbody></table>
+    </div>
+    <div class="panel">
+      <h2>По источникам</h2>
+      <table><thead><tr><th>Источник</th><th>Запросы</th></tr></thead><tbody id="sources-table"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const STORAGE_KEY = "analytics_admin_token";
+  let token = localStorage.getItem(STORAGE_KEY) || "";
+
+  const loginScreen = document.getElementById("login-screen");
+  const app = document.getElementById("app");
+  const tokenInput = document.getElementById("token-input");
+  const loginBtn = document.getElementById("login-btn");
+  const loginError = document.getElementById("login-error");
+  const refreshBtn = document.getElementById("refresh-btn");
+  const daysInput = document.getElementById("days-input");
+
+  const setAuthState = (ok) => {
+    loginScreen.style.display = ok ? "none" : "flex";
+    app.classList.toggle("active", !!ok);
+  };
+
+  const authHeaders = () => ({ Authorization: `Bearer ${token}` });
+
+  const fillTable = (elId, mapObj) => {
+    const body = document.getElementById(elId);
+    body.innerHTML = "";
+    const entries = Object.entries(mapObj || {}).sort((a, b) => b[1] - a[1]);
+    if (!entries.length) {
+      body.innerHTML = `<tr><td colspan="2" style="color:#8a93a6">Нет данных</td></tr>`;
+      return;
+    }
+    for (const [k, v] of entries) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${k}</td><td>${v}</td>`;
+      body.appendChild(tr);
+    }
+  };
+
+  const renderChart = (rows) => {
+    const el = document.getElementById("chart");
+    el.innerHTML = "";
+    const max = Math.max(1, ...rows.map(x => x.count || 0));
+    for (const row of rows) {
+      const wrap = document.createElement("div");
+      wrap.className = "bar-wrap";
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      bar.style.height = `${Math.round(((row.count || 0) / max) * 170)}px`;
+      bar.innerHTML = `<span class="bar-value">${row.count || 0}</span>`;
+      const label = document.createElement("div");
+      label.className = "bar-label";
+      label.textContent = (row.date || "").slice(5);
+      wrap.appendChild(bar);
+      wrap.appendChild(label);
+      el.appendChild(wrap);
+    }
+  };
+
+  async function loadStats() {
+    const days = Number(daysInput.value || 7);
+    const res = await fetch(`/api/analytics?days=${encodeURIComponent(days)}`, {
+      headers: authHeaders(),
+    });
+    if (res.status === 401) {
+      throw new Error("Неверный токен");
+    }
+    if (!res.ok) {
+      throw new Error("Ошибка загрузки аналитики");
+    }
+    const data = await res.json();
+    document.getElementById("m-total").textContent = data.totalRequests || 0;
+    document.getElementById("m-latency").textContent = Math.round(data.avgLatencyMs || 0);
+    document.getElementById("m-offline").textContent = `${data.offlineRate || 0}%`;
+    document.getElementById("m-success").textContent = `${data.successRate || 0}%`;
+    fillTable("modes-table", data.requestsByMode);
+    fillTable("providers-table", data.requestsByProvider);
+    fillTable("sources-table", data.requestsBySource);
+    renderChart(data.requestsByDay || []);
+  }
+
+  loginBtn.addEventListener("click", async () => {
+    loginError.textContent = "";
+    token = tokenInput.value.trim();
+    if (!token) {
+      loginError.textContent = "Введите токен";
+      return;
+    }
+    try {
+      await loadStats();
+      localStorage.setItem(STORAGE_KEY, token);
+      setAuthState(true);
+    } catch (e) {
+      loginError.textContent = e.message || "Ошибка";
+      setAuthState(false);
+    }
+  });
+
+  refreshBtn.addEventListener("click", async () => {
+    try {
+      await loadStats();
+    } catch (e) {
+      alert(e.message || "Ошибка");
+      setAuthState(false);
+    }
+  });
+
+  document.getElementById("logout-btn").addEventListener("click", () => {
+    token = "";
+    localStorage.removeItem(STORAGE_KEY);
+    tokenInput.value = "";
+    setAuthState(false);
+  });
+
+  (async () => {
+    if (!token) {
+      setAuthState(false);
+      return;
+    }
+    try {
+      await loadStats();
+      setAuthState(true);
+    } catch (_) {
+      setAuthState(false);
+    }
+  })();
+})();
+</script>
+</body>
+</html>
