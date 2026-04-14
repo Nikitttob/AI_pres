@@ -220,34 +220,15 @@ function search(modeId, query, subMode = "all", topN = 5) {
 }
 
 // ═══════════════════════════════════════════════
-// Claude API
+// LLM-провайдеры (Claude + Ollama с fallback)
 // ═══════════════════════════════════════════════
-async function callClaude(systemPrompt, messages) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+const { ProviderManager } = require("./src/providers");
+const llm = new ProviderManager();
 
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: process.env.MODEL || "claude-sonnet-4-20250514",
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages
-      })
-    });
-    const data = await res.json();
-    if (data.error) { console.error("API Error:", data.error); return null; }
-    return data.content?.map(i => i.text || "").join("\n") || null;
-  } catch (err) {
-    console.error("Fetch error:", err.message);
-    return null;
-  }
+// Обёртка для обратной совместимости: возвращает только текст ответа
+async function callLLM(systemPrompt, messages) {
+  const { answer } = await llm.generate(systemPrompt, messages);
+  return answer;
 }
 
 // ═══════════════════════════════════════════════
@@ -298,7 +279,7 @@ app.post("/api/chat", async (req, res) => {
   messages.push({ role: "user", content: userContent });
 
   // Вызов Claude
-  const answer = await callClaude(mode.systemPrompt, messages);
+  const answer = await callLLM(mode.systemPrompt, messages);
 
   if (answer) {
     res.json({ answer, sources: context, offline: false });
@@ -329,10 +310,17 @@ app.post("/api/search", (req, res) => {
 // ═══════════════════════════════════════════════
 // API: Health check
 // ═══════════════════════════════════════════════
-app.get("/health", (req, res) => {
+app.get("/health", async (req, res) => {
   const kbStats = {};
   for (const [k, v] of Object.entries(knowledgeBases)) kbStats[k] = v.length;
-  res.json({ status: "ok", modes: Object.keys(MODES).length, kb: kbStats, uptime: process.uptime() });
+  const providers = await llm.status();
+  res.json({
+    status: "ok",
+    modes: Object.keys(MODES).length,
+    kb: kbStats,
+    providers,
+    uptime: process.uptime(),
+  });
 });
 
 // ═══════════════════════════════════════════════
@@ -542,7 +530,7 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
       : text;
     apiMessages.push({ role: "user", content: userContent });
 
-    const answer = await callClaude(mode.systemPrompt, apiMessages);
+    const answer = await callLLM(mode.systemPrompt, apiMessages);
 
     if (answer) {
       addToHistory(chatId, "assistant", answer);
@@ -609,7 +597,8 @@ app.listen(PORT, () => {
   console.log("╠══════════════════════════════════════════════╣");
   console.log(`║  🌐 http://localhost:${PORT}                     ║`);
   console.log(`║  📚 Режимов: ${Object.keys(MODES).length}                              ║`);
-  console.log(`║  🔑 API: ${process.env.ANTHROPIC_API_KEY ? "✅" : "❌"}  TG: ${process.env.TELEGRAM_BOT_TOKEN ? "✅" : "❌"}                       ║`);
+  console.log(`║  🔑 Claude: ${process.env.ANTHROPIC_API_KEY ? "✅" : "❌"}  🦙 Ollama: ${process.env.OLLAMA_HOST ? "✅" : "—"}  TG: ${process.env.TELEGRAM_BOT_TOKEN ? "✅" : "❌"}   ║`);
+  console.log(`║  🎯 LLM primary: ${(process.env.LLM_PROVIDER || "claude").padEnd(28)}║`);
   console.log("╚══════════════════════════════════════════════╝");
   console.log("");
 });
