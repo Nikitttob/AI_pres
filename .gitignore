@@ -27,3 +27,6 @@ coverage/
 *.pem
 *.key
 secrets/
+
+# Telegram bot state
+/data/bot-state.json
