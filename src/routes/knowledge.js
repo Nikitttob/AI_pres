@@ -6,6 +6,7 @@ const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
 const { sanitizeString, validateRequired } = require("../middleware/validate");
+const { invalidateSearchCache } = require("../rag/search");
 const { logRequest } = require("../analytics/logger");
 
 /**
@@ -146,6 +147,8 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
       return res.status(500).json({ error: "Не удалось сохранить файл: " + e.message });
     }
 
+    invalidateSearchCache(base);
+
     const idx = knowledgeBases[base].length - 1;
     res.json({ ok: true, added: toApi(entry, idx), count: knowledgeBases[base].length });
   });
@@ -263,6 +266,7 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
       knowledgeBases[base].splice(knowledgeBases[base].length - added.length, added.length);
       return res.status(500).json({ error: "Не удалось сохранить файл: " + e.message });
     }
+    invalidateSearchCache(base);
 
     logRequest({
       modeId: base,
@@ -299,6 +303,7 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
       arr.splice(idx, 0, removed); // откат
       return res.status(500).json({ error: "Не удалось сохранить файл: " + e.message });
     }
+    invalidateSearchCache(base);
     res.json({ ok: true, removed: toApi(removed, idx), count: arr.length });
   });
 
