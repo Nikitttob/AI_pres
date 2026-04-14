@@ -314,12 +314,20 @@ const { flushState } = require("./bot/state");
 
 let telegramShutdown = null;
 
+const webhookUrl = process.env.WEBHOOK_URL
+  ? process.env.WEBHOOK_URL
+  : process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : null;
+
 if (process.env.TELEGRAM_BOT_TOKEN) {
   const { startBot } = require("./bot");
   const { shutdown } = startBot({
     token: process.env.TELEGRAM_BOT_TOKEN,
     search,
     callLLM,
+    webhookUrl,
+    app,
   });
   telegramShutdown = shutdown;
 } else {
