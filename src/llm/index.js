@@ -1,6 +1,7 @@
 const LLMProvider = require("./LLMProvider");
 const ClaudeProvider = require("./ClaudeProvider");
 const OllamaProvider = require("./OllamaProvider");
+const ProviderManager = require("./ProviderManager");
 
 /**
  * Реестр доступных провайдеров. Чтобы добавить нового (например, GigaChat),
@@ -58,11 +59,23 @@ function resetLLMProvider() {
   _cachedKey = null;
 }
 
+/**
+ * Фабрика менеджера с fallback-цепочкой. Основной провайдер — LLM_PROVIDER;
+ * при недоступности автоматически переключается на резервные.
+ * @param {object} [opts] — прокидывается в конструктор ProviderManager
+ * @returns {ProviderManager}
+ */
+function getLLMManager(opts = {}) {
+  return new ProviderManager(opts);
+}
+
 module.exports = {
   LLMProvider,
   ClaudeProvider,
   OllamaProvider,
+  ProviderManager,
   getLLMProvider,
+  getLLMManager,
   resetLLMProvider,
   REGISTRY,
 };

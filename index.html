@@ -25,10 +25,13 @@ body{font-family:'Segoe UI',-apple-system,sans-serif;background:var(--bg);color:
 .mode-name{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mode-desc{font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 .mode-badge{font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg4);color:var(--text3);margin-left:auto;flex-shrink:0}
-.sidebar-footer{padding:12px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--text3)}
-.status-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px}
+.sidebar-footer{padding:12px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--text3);display:flex;flex-direction:column;gap:4px}
+.status-row{display:flex;align-items:center;gap:6px}
+.status-row .label{flex:1}
+.status-row .primary-tag{font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(59,130,246,.2);color:#60a5fa;text-transform:uppercase}
+.status-dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex-shrink:0}
 .status-dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
-.status-dot.off{background:var(--gold);box-shadow:0 0 6px var(--gold)}
+.status-dot.off{background:var(--red);box-shadow:0 0 4px var(--red);opacity:.7}
 
 /* Main area */
 .main{flex:1;display:flex;flex-direction:column;min-width:0}
@@ -106,9 +109,8 @@ body{font-family:'Segoe UI',-apple-system,sans-serif;background:var(--bg);color:
     </div>
   </div>
   <div class="sidebar-modes" id="modesList"></div>
-  <div class="sidebar-footer">
-    <span class="status-dot" id="sDot"></span>
-    <span id="sStatus">Загрузка...</span>
+  <div class="sidebar-footer" id="providersStatus">
+    <div class="status-row"><span class="status-dot off"></span><span class="label">Загрузка...</span></div>
   </div>
 </div>
 
@@ -152,13 +154,31 @@ async function init(){
     const r=await fetch("/api/modes");
     const d=await r.json();
     modes=d.modes;
-    document.getElementById("sDot").className=d.hasApiKey?"status-dot on":"status-dot off";
-    document.getElementById("sStatus").textContent=d.hasApiKey?"Claude API подключён":"Оффлайн-режим";
+    renderProviders(d.providers||{});
     renderModes();
     const last=getLastMode();
     const startMode=modes.find(m=>m.id===last)||modes[0];
     setMode(startMode.id);
-  }catch(e){document.getElementById("sStatus").textContent="Ошибка"}
+  }catch(e){
+    const box=document.getElementById("providersStatus");
+    if(box) box.innerHTML='<div class="status-row"><span class="status-dot off"></span><span class="label">Ошибка</span></div>';
+  }
+}
+
+function renderProviders(p){
+  const box=document.getElementById("providersStatus");
+  if(!box) return;
+  const labels={claude:"Claude API",ollama:"Ollama"};
+  const keys=Object.keys(labels);
+  const anyOn=keys.some(k=>p[k]===true);
+  const rows=keys.map(k=>{
+    const on=p[k]===true;
+    const isPrimary=p.primary===k;
+    const tag=isPrimary?'<span class="primary-tag">primary</span>':'';
+    return `<div class="status-row"><span class="status-dot ${on?'on':'off'}"></span><span class="label">${labels[k]}</span>${tag}</div>`;
+  });
+  if(!anyOn) rows.push('<div class="status-row"><span class="label" style="color:var(--gold)">⚡ Оффлайн-режим</span></div>');
+  box.innerHTML=rows.join("");
 }
 
 function renderModes(){

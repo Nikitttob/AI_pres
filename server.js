@@ -2,7 +2,6 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
-const { getLLMProvider } = require("./src/llm");
 
 // ═══════════════════════════════════════════════
 // Загрузка .env
@@ -221,36 +220,37 @@ function search(modeId, query, subMode = "all", topN = 5) {
 }
 
 // ═══════════════════════════════════════════════
-// LLM-провайдер (Claude / Ollama / …) — выбирается переменной LLM_PROVIDER
+// LLM-провайдеры (Claude + Ollama с fallback)
 // ═══════════════════════════════════════════════
-const llmProvider = getLLMProvider();
+const { getLLMManager } = require("./src/llm");
+const llm = getLLMManager();
 
-/**
- * Обёртка для обратной совместимости со старым кодом.
- * Делегирует вызов в выбранный LLM-провайдер.
- */
-async function callClaude(systemPrompt, messages) {
-  return llmProvider.generateResponse(messages, {
+// Обёртка для обратной совместимости: возвращает только текст ответа
+async function callLLM(systemPrompt, messages) {
+  const { answer } = await llm.generateResponse(messages, {
     systemPrompt,
     maxTokens: 2000,
   });
+  return answer;
 }
 
 // ═══════════════════════════════════════════════
 // API: Список режимов
 // ═══════════════════════════════════════════════
-app.get("/api/modes", (req, res) => {
+app.get("/api/modes", async (req, res) => {
   const modes = Object.values(MODES).map(m => ({
     id: m.id, name: m.name, icon: m.icon,
     description: m.description, type: m.type,
     examples: m.examples, subModes: m.subModes,
     kbSize: (knowledgeBases[m.id] || []).length
   }));
-  res.json({
-    modes,
-    hasApiKey: llmProvider.isAvailable(),
-    provider: llmProvider.name,
-  });
+  const providers = await llm.status();
+  // hasApiKey сохранён для обратной совместимости: true, если есть
+  // любой доступный LLM-провайдер.
+  const hasApiKey = Object.entries(providers)
+    .filter(([k]) => k !== "primary")
+    .some(([, v]) => v === true);
+  res.json({ modes, providers, hasApiKey });
 });
 
 // ═══════════════════════════════════════════════
@@ -288,21 +288,22 @@ app.post("/api/chat", async (req, res) => {
   messages.push({ role: "user", content: userContent });
 
   // Вызов Claude
-  const answer = await callClaude(mode.systemPrompt, messages);
+  const answer = await callLLM(mode.systemPrompt, messages);
 
   if (answer) {
     res.json({ answer, sources: context, offline: false });
   } else {
-    // Оффлайн
+    // Оффлайн — ни один LLM-провайдер недоступен
+    const hint = "Настройте ANTHROPIC_API_KEY или запустите Ollama (OLLAMA_HOST, OLLAMA_MODEL).";
     let offlineAnswer;
     if (mode.type === "rag" && context.length > 0) {
       offlineAnswer = "📋 **Результаты из базы знаний:**\n\n" +
         context.map(c => `**${c.q}**\n${c.a}\n📌 _${c.r}_`).join("\n\n") +
-        "\n\n---\n_⚡ Оффлайн-режим. Установите ANTHROPIC_API_KEY для полноценных ответов._";
+        `\n\n---\n_⚡ Оффлайн-режим: нет доступных LLM-провайдеров. ${hint}_`;
     } else if (mode.type === "rag") {
-      offlineAnswer = "В базе знаний не найдено релевантной информации. Установите API ключ для ответов на произвольные вопросы.";
+      offlineAnswer = `В базе знаний не найдено релевантной информации, а LLM-провайдеры недоступны. ${hint}`;
     } else {
-      offlineAnswer = `⚠️ Режим «${mode.name}» работает только с Claude API. Установите ANTHROPIC_API_KEY в переменных Railway.`;
+      offlineAnswer = `⚠️ Режим «${mode.name}» требует LLM-провайдера. ${hint}`;
     }
     res.json({ answer: offlineAnswer, sources: context, offline: true });
   }
@@ -319,10 +320,17 @@ app.post("/api/search", (req, res) => {
 // ═══════════════════════════════════════════════
 // API: Health check
 // ═══════════════════════════════════════════════
-app.get("/health", (req, res) => {
+app.get("/health", async (req, res) => {
   const kbStats = {};
   for (const [k, v] of Object.entries(knowledgeBases)) kbStats[k] = v.length;
-  res.json({ status: "ok", modes: Object.keys(MODES).length, kb: kbStats, uptime: process.uptime() });
+  const providers = await llm.status();
+  res.json({
+    status: "ok",
+    modes: Object.keys(MODES).length,
+    kb: kbStats,
+    providers,
+    uptime: process.uptime(),
+  });
 });
 
 // ═══════════════════════════════════════════════
@@ -532,7 +540,7 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
       : text;
     apiMessages.push({ role: "user", content: userContent });
 
-    const answer = await callClaude(mode.systemPrompt, apiMessages);
+    const answer = await callLLM(mode.systemPrompt, apiMessages);
 
     if (answer) {
       addToHistory(chatId, "assistant", answer);
@@ -565,7 +573,8 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
       );
     } else {
       bot.sendMessage(chatId,
-        `⚠️ Режим «${mode.name}» требует API ключа для ответов без базы знаний.`,
+        `⚠️ Режим «${mode.name}»: нет доступных LLM-провайдеров. ` +
+        `Настройте ANTHROPIC_API_KEY или запустите Ollama (OLLAMA_HOST, OLLAMA_MODEL).`,
         { reply_markup: modeKeyboard() }
       );
     }
@@ -592,14 +601,19 @@ app.get("*", (req, res) => res.sendFile(indexPath));
 // Запуск
 // ═══════════════════════════════════════════════
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+  const status = await llm.status();
+  const claudeIcon = status.claude ? "✅" : "❌";
+  const ollamaIcon = status.ollama ? "✅" : "❌";
+  const tgIcon = process.env.TELEGRAM_BOT_TOKEN ? "✅" : "❌";
   console.log("");
   console.log("╔══════════════════════════════════════════════╗");
   console.log("║  🚀 AI Мультиассистент v2.0 запущен!         ║");
   console.log("╠══════════════════════════════════════════════╣");
   console.log(`║  🌐 http://localhost:${PORT}                     ║`);
   console.log(`║  📚 Режимов: ${Object.keys(MODES).length}                              ║`);
-  console.log(`║  🧠 LLM: ${llmProvider.name.padEnd(8)} ${llmProvider.isAvailable() ? "✅" : "❌"}  TG: ${process.env.TELEGRAM_BOT_TOKEN ? "✅" : "❌"}            ║`);
+  console.log(`║  🔑 Claude: ${claudeIcon}  🦙 Ollama: ${ollamaIcon}  TG: ${tgIcon}                ║`);
+  console.log(`║  🎯 LLM primary: ${status.primary.padEnd(28)}║`);
   console.log("╚══════════════════════════════════════════════╝");
   console.log("");
 });
