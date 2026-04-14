@@ -3,7 +3,9 @@
 // ═══════════════════════════════════════════════
 const express = require("express");
 const fs = require("fs");
+const fsp = fs.promises;
 const path = require("path");
+const { validateBody } = require("../middleware/validate");
 
 /**
  * Фабрика роутера управления базами знаний.
@@ -82,12 +84,12 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
     return "[\n" + arr.map((x) => JSON.stringify(x)).join(",\n") + "\n]\n";
   }
 
-  function saveKB(modeId) {
+  async function saveKB(modeId) {
     const p = kbPath(modeId);
     if (!p) throw new Error(`kbFile не задан для "${modeId}"`);
     // Гарантируем существование директории
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, serializeKB(knowledgeBases[modeId]), "utf-8");
+    await fsp.mkdir(path.dirname(p), { recursive: true });
+    await fsp.writeFile(p, serializeKB(knowledgeBases[modeId]), "utf-8");
   }
 
   function hasBase(base) {
@@ -118,7 +120,17 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
   });
 
   // ── 3) POST /api/knowledge/:base — добавить ───
-  router.post("/:base", auth, limiter, (req, res) => {
+  router.post(
+    "/:base",
+    auth,
+    limiter,
+    validateBody({
+      question: { type: "string", required: true, min: 1 },
+      answer: { type: "string", required: true, min: 1 },
+      source: { type: "string" },
+      subMode: { type: "string" },
+    }),
+    async (req, res) => {
     const base = req.params.base;
     if (!hasBase(base)) return res.status(404).json({ error: "База не найдена" });
 
@@ -130,7 +142,7 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
     const entry = toStorage({ question, answer, source, subMode });
     knowledgeBases[base].push(entry);
     try {
-      saveKB(base);
+      await saveKB(base);
     } catch (e) {
       knowledgeBases[base].pop();
       return res.status(500).json({ error: "Не удалось сохранить файл: " + e.message });
@@ -138,10 +150,19 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
 
     const idx = knowledgeBases[base].length - 1;
     res.json({ ok: true, added: toApi(entry, idx), count: knowledgeBases[base].length });
-  });
+    }
+  );
 
   // ── 4) POST /api/knowledge/:base/generate — AI ─
-  router.post("/:base/generate", auth, limiter, async (req, res) => {
+  router.post(
+    "/:base/generate",
+    auth,
+    limiter,
+    validateBody({
+      text: { type: "string", required: true, min: 20 },
+      source: { type: "string" },
+    }),
+    async (req, res) => {
     const base = req.params.base;
     if (!hasBase(base)) return res.status(404).json({ error: "База не найдена" });
 
@@ -221,7 +242,7 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
     }
 
     try {
-      saveKB(base);
+      await saveKB(base);
     } catch (e) {
       // Откат
       knowledgeBases[base].splice(knowledgeBases[base].length - added.length, added.length);
@@ -235,10 +256,11 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
       count: knowledgeBases[base].length,
       provider: "llm",
     });
-  });
+    }
+  );
 
   // ── 5) DELETE /api/knowledge/:base/:index ─────
-  router.delete("/:base/:index", auth, limiter, (req, res) => {
+  router.delete("/:base/:index", auth, limiter, async (req, res) => {
     const base = req.params.base;
     const idx = parseInt(req.params.index, 10);
     if (!hasBase(base)) return res.status(404).json({ error: "База не найдена" });
@@ -249,7 +271,7 @@ function createKnowledgeRouter({ knowledgeBases, MODES, llm, rootDir, adminLimit
 
     const [removed] = arr.splice(idx, 1);
     try {
-      saveKB(base);
+      await saveKB(base);
     } catch (e) {
       arr.splice(idx, 0, removed); // откат
       return res.status(500).json({ error: "Не удалось сохранить файл: " + e.message });
