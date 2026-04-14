@@ -3,6 +3,7 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const Fuse = require("fuse.js");
+const { getLLMProvider } = require("./src/llm");
 
 // ═══════════════════════════════════════════════
 // Загрузка .env
@@ -358,34 +359,19 @@ function auditKB(modeId) {
 }
 
 // ═══════════════════════════════════════════════
-// Claude API
+// LLM-провайдер (Claude / Ollama / …) — выбирается переменной LLM_PROVIDER
 // ═══════════════════════════════════════════════
-async function callClaude(systemPrompt, messages) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+const llmProvider = getLLMProvider();
 
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: process.env.MODEL || "claude-sonnet-4-20250514",
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages
-      })
-    });
-    const data = await res.json();
-    if (data.error) { console.error("API Error:", data.error); return null; }
-    return data.content?.map(i => i.text || "").join("\n") || null;
-  } catch (err) {
-    console.error("Fetch error:", err.message);
-    return null;
-  }
+/**
+ * Обёртка для обратной совместимости со старым кодом.
+ * Делегирует вызов в выбранный LLM-провайдер.
+ */
+async function callClaude(systemPrompt, messages) {
+  return llmProvider.generateResponse(messages, {
+    systemPrompt,
+    maxTokens: 2000,
+  });
 }
 
 // ═══════════════════════════════════════════════
@@ -398,7 +384,11 @@ app.get("/api/modes", (req, res) => {
     examples: m.examples, subModes: m.subModes,
     kbSize: (knowledgeBases[m.id] || []).length
   }));
-  res.json({ modes, hasApiKey: !!process.env.ANTHROPIC_API_KEY });
+  res.json({
+    modes,
+    hasApiKey: llmProvider.isAvailable(),
+    provider: llmProvider.name,
+  });
 });
 
 // ═══════════════════════════════════════════════
@@ -767,7 +757,7 @@ app.listen(PORT, () => {
   console.log("╠══════════════════════════════════════════════╣");
   console.log(`║  🌐 http://localhost:${PORT}                     ║`);
   console.log(`║  📚 Режимов: ${Object.keys(MODES).length}                              ║`);
-  console.log(`║  🔑 API: ${process.env.ANTHROPIC_API_KEY ? "✅" : "❌"}  TG: ${process.env.TELEGRAM_BOT_TOKEN ? "✅" : "❌"}                       ║`);
+  console.log(`║  🧠 LLM: ${llmProvider.name.padEnd(8)} ${llmProvider.isAvailable() ? "✅" : "❌"}  TG: ${process.env.TELEGRAM_BOT_TOKEN ? "✅" : "❌"}            ║`);
   console.log("╚══════════════════════════════════════════════╝");
   console.log("");
 });
