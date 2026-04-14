@@ -119,11 +119,12 @@ OLLAMA_MODEL=llama3.1:8b
 .
 ├── server.js                     # Express + Telegram-бот
 ├── src/
-│   └── providers/
-│       ├── BaseProvider.js       # абстрактный класс
+│   └── llm/
+│       ├── LLMProvider.js        # абстрактный класс
 │       ├── ClaudeProvider.js     # Anthropic Claude
-│       ├── OllamaProvider.js     # локальный Ollama
-│       └── index.js              # ProviderManager + fallback
+│       ├── OllamaProvider.js     # локальный Ollama (npm `ollama`)
+│       ├── ProviderManager.js    # fallback между провайдерами
+│       └── index.js              # фабрики getLLMProvider / getLLMManager
 ├── kb_*.json                     # базы знаний для RAG
 ├── index.html                    # веб-интерфейс
 └── .env.example
@@ -131,9 +132,11 @@ OLLAMA_MODEL=llama3.1:8b
 
 ## Добавление нового провайдера
 
-1. Создайте класс, наследующий `BaseProvider`, в `src/providers/`.
-2. Реализуйте `isAvailable()` и `generate(systemPrompt, messages)`.
-3. Зарегистрируйте его в `ProviderManager` (`src/providers/index.js`).
+1. Создайте класс, наследующий `LLMProvider`, в `src/llm/`.
+2. Реализуйте `generateResponse(prompt, options)` и `isAvailable()`
+   (плюс `checkAvailability()`, если нужен сетевой ping).
+3. Зарегистрируйте его в `REGISTRY` (`src/llm/index.js`) и/или
+   передайте в `ProviderManager`.
 
 ## Ограничения
 

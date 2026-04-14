@@ -222,12 +222,15 @@ function search(modeId, query, subMode = "all", topN = 5) {
 // ═══════════════════════════════════════════════
 // LLM-провайдеры (Claude + Ollama с fallback)
 // ═══════════════════════════════════════════════
-const { ProviderManager } = require("./src/providers");
-const llm = new ProviderManager();
+const { getLLMManager } = require("./src/llm");
+const llm = getLLMManager();
 
 // Обёртка для обратной совместимости: возвращает только текст ответа
 async function callLLM(systemPrompt, messages) {
-  const { answer } = await llm.generate(systemPrompt, messages);
+  const { answer } = await llm.generateResponse(messages, {
+    systemPrompt,
+    maxTokens: 2000,
+  });
   return answer;
 }
 
