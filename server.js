@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
+const Fuse = require("fuse.js");
 
 // ═══════════════════════════════════════════════
 // Загрузка .env
@@ -159,9 +160,25 @@ const MODES = {
 };
 
 // ═══════════════════════════════════════════════
-// Загрузка баз знаний (RAG)
+// Загрузка баз знаний (RAG) + построение Fuse-индексов
 // ═══════════════════════════════════════════════
 const knowledgeBases = {};
+const fuseIndexes = {};
+
+// Конфигурация Fuse: вес q выше, чем a (вопрос точнее отражает тему),
+// includeScore — для гибридного ранжирования, threshold — терпимость к опечаткам.
+const FUSE_OPTIONS = {
+  keys: [
+    { name: "q", weight: 0.65 },
+    { name: "a", weight: 0.30 },
+    { name: "r", weight: 0.05 }
+  ],
+  includeScore: true,
+  ignoreLocation: true,   // важно для длинных текстов ответов
+  threshold: 0.45,        // 0.0 — точное совпадение, 1.0 — любое
+  minMatchCharLength: 3,
+  useExtendedSearch: false
+};
 
 for (const [modeId, mode] of Object.entries(MODES)) {
   if (mode.type === "rag" && mode.kbFile) {
@@ -172,16 +189,18 @@ for (const [modeId, mode] of Object.entries(MODES)) {
     const kbPath = paths.find(p => fs.existsSync(p));
     if (kbPath) {
       knowledgeBases[modeId] = JSON.parse(fs.readFileSync(kbPath, "utf-8"));
-      console.log(`📚 ${mode.name}: ${knowledgeBases[modeId].length} вопросов загружено`);
+      fuseIndexes[modeId] = new Fuse(knowledgeBases[modeId], FUSE_OPTIONS);
+      console.log(`📚 ${mode.name}: ${knowledgeBases[modeId].length} вопросов загружено (Fuse-индекс построен)`);
     } else {
       console.log(`⚠️  ${mode.name}: файл ${mode.kbFile} не найден`);
       knowledgeBases[modeId] = [];
+      fuseIndexes[modeId] = new Fuse([], FUSE_OPTIONS);
     }
   }
 }
 
 // ═══════════════════════════════════════════════
-// Поисковый движок
+// Поисковый движок: гибридный (токены + fuzzy) + LRU-кэш
 // ═══════════════════════════════════════════════
 const STOP_WORDS = new Set([
   "и","в","на","по","с","к","о","из","за","от","для","не","что","как",
@@ -195,28 +214,147 @@ function tokenize(text) {
     .split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
 }
 
+// --- Простой LRU-кэш на Map (insertion order) ---
+class LRUCache {
+  constructor(max = 200) { this.max = max; this.map = new Map(); this.hits = 0; this.misses = 0; }
+  get(key) {
+    if (!this.map.has(key)) { this.misses++; return undefined; }
+    const v = this.map.get(key);
+    this.map.delete(key); this.map.set(key, v); // bump recency
+    this.hits++;
+    return v;
+  }
+  set(key, value) {
+    if (this.map.has(key)) this.map.delete(key);
+    this.map.set(key, value);
+    if (this.map.size > this.max) this.map.delete(this.map.keys().next().value);
+  }
+  clear() { this.map.clear(); this.hits = 0; this.misses = 0; }
+  stats() { return { size: this.map.size, max: this.max, hits: this.hits, misses: this.misses }; }
+}
+const searchCache = new LRUCache(Number(process.env.SEARCH_CACHE_SIZE) || 200);
+const CACHE_TTL_MS = Number(process.env.SEARCH_CACHE_TTL_MS) || 10 * 60 * 1000;
+
+function normalizeQuery(q) {
+  return (q || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+// --- Token-overlap score (старая логика, для гибрида) ---
+function tokenScore(queryTokens, item) {
+  if (queryTokens.length === 0) return 0;
+  const itemTokens = tokenize(item.q + " " + item.a);
+  let score = 0;
+  for (const t of queryTokens) {
+    for (const it of itemTokens) {
+      if (it === t) score += 3;
+      else if (it.startsWith(t) || t.startsWith(it)) score += 2;
+      else if (it.includes(t) || t.includes(it)) score += 1;
+    }
+  }
+  // Нормализация по длине запроса, чтобы длинные запросы не перевешивали всё
+  return score / Math.max(1, queryTokens.length);
+}
+
+/**
+ * Гибридный поиск:
+ *   final = 0.6 * fuzzy + 0.4 * token_overlap
+ * Fuzzy даёт устойчивость к опечаткам и словоформам;
+ * token-overlap — точные попадания терминологии.
+ */
 function search(modeId, query, subMode = "all", topN = 5) {
   const kb = knowledgeBases[modeId] || [];
-  const tokens = tokenize(query);
-  if (tokens.length === 0 || kb.length === 0) return [];
+  if (!query || kb.length === 0) return [];
 
-  return kb
-    .filter(item => subMode === "all" || !item.t || item.t === subMode)
-    .map(item => {
-      const itemTokens = tokenize(item.q + " " + item.a);
-      let score = 0;
-      for (const t of tokens) {
-        for (const it of itemTokens) {
-          if (it === t) score += 3;
-          else if (it.startsWith(t) || t.startsWith(it)) score += 2;
-          else if (it.includes(t) || t.includes(it)) score += 1;
-        }
+  const cacheKey = `${modeId}|${subMode}|${topN}|${normalizeQuery(query)}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.results;
+
+  const queryTokens = tokenize(query);
+
+  // 1) Fuzzy-результаты (весь KB), Fuse сам отсеивает слабые совпадения по threshold
+  const fuse = fuseIndexes[modeId];
+  const fuseHits = fuse ? fuse.search(query) : [];
+  // Fuse score: 0 — идеально, 1 — нерелевантно. Инвертируем.
+  const fuzzyMap = new Map();
+  for (const hit of fuseHits) fuzzyMap.set(hit.item, 1 - hit.score);
+
+  // 2) Считаем гибридный score по всем кандидатам из fuse + (fallback) по токенам
+  const candidates = new Set(fuseHits.map(h => h.item));
+  if (candidates.size === 0 && queryTokens.length > 0) {
+    // Если fuzzy ничего не нашёл — расширяем поиск по всей базе с token-score
+    for (const it of kb) candidates.add(it);
+  }
+
+  const results = [];
+  for (const item of candidates) {
+    if (subMode !== "all" && item.t && item.t !== subMode) continue;
+    const fuzzy = fuzzyMap.get(item) || 0;
+    const tokens = tokenScore(queryTokens, item);
+    // Нормализуем tokenScore в [0..1]: эмпирически делим на 10 с клампом
+    const tokensNorm = Math.min(1, tokens / 10);
+    const finalScore = 0.6 * fuzzy + 0.4 * tokensNorm;
+    if (finalScore <= 0) continue;
+    results.push({
+      ...item,
+      score: Number(finalScore.toFixed(4)),
+      _fuzzy: Number(fuzzy.toFixed(4)),
+      _tokens: Number(tokensNorm.toFixed(4))
+    });
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  const top = results.slice(0, topN);
+  searchCache.set(cacheKey, { ts: Date.now(), results: top });
+  return top;
+}
+
+// ═══════════════════════════════════════════════
+// Аудит базы знаний: пустые поля, точные и near-duplicates
+// ═══════════════════════════════════════════════
+function auditKB(modeId) {
+  const kb = knowledgeBases[modeId] || [];
+  const report = {
+    mode: modeId,
+    total: kb.length,
+    emptyQ: 0, emptyA: 0, emptyR: 0, missingT: 0,
+    exactDuplicates: [],
+    nearDuplicates: [],
+    avgAnswerLen: 0,
+    fieldSet: new Set()
+  };
+  const seen = new Map();
+  let lenSum = 0;
+
+  for (let i = 0; i < kb.length; i++) {
+    const it = kb[i];
+    Object.keys(it).forEach(k => report.fieldSet.add(k));
+    if (!it.q || !String(it.q).trim()) report.emptyQ++;
+    if (!it.a || !String(it.a).trim()) report.emptyA++;
+    if (!it.r || !String(it.r).trim()) report.emptyR++;
+    if (!it.t) report.missingT++;
+    lenSum += (it.a || "").length;
+    const key = normalizeQuery(it.q);
+    if (seen.has(key)) report.exactDuplicates.push({ i, j: seen.get(key), q: it.q });
+    else seen.set(key, i);
+  }
+  report.avgAnswerLen = kb.length ? Math.round(lenSum / kb.length) : 0;
+  report.fieldSet = [...report.fieldSet];
+
+  // Near-duplicates по Jaccard-сходству токенов вопроса (>= 0.75)
+  const tokenSets = kb.map(it => new Set(tokenize(it.q || "")));
+  for (let i = 0; i < kb.length; i++) {
+    for (let j = i + 1; j < kb.length; j++) {
+      const A = tokenSets[i], B = tokenSets[j];
+      if (A.size === 0 || B.size === 0) continue;
+      let inter = 0;
+      for (const t of A) if (B.has(t)) inter++;
+      const jacc = inter / (A.size + B.size - inter);
+      if (jacc >= 0.75) {
+        report.nearDuplicates.push({ i, j, jaccard: Number(jacc.toFixed(3)), qi: kb[i].q, qj: kb[j].q });
       }
-      return { ...item, score };
-    })
-    .filter(item => item.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topN);
+    }
+  }
+  return report;
 }
 
 // ═══════════════════════════════════════════════
@@ -322,8 +460,28 @@ app.post("/api/chat", async (req, res) => {
 // API: Поиск по базе знаний
 // ═══════════════════════════════════════════════
 app.post("/api/search", (req, res) => {
-  const { query, modeId, subMode } = req.body;
-  res.json({ results: search(modeId || "zhkh", query || "", subMode || "all") });
+  const { query, modeId, subMode, topN } = req.body;
+  res.json({
+    results: search(modeId || "zhkh", query || "", subMode || "all", topN || 5)
+  });
+});
+
+// ═══════════════════════════════════════════════
+// API: Аудит баз знаний
+// ═══════════════════════════════════════════════
+app.get("/api/kb-audit", (req, res) => {
+  const reports = {};
+  for (const modeId of Object.keys(knowledgeBases)) reports[modeId] = auditKB(modeId);
+  res.json({ reports, cache: searchCache.stats() });
+});
+
+// ═══════════════════════════════════════════════
+// API: Управление кэшем поиска
+// ═══════════════════════════════════════════════
+app.get("/api/cache-stats", (req, res) => res.json(searchCache.stats()));
+app.post("/api/cache-clear", (req, res) => {
+  searchCache.clear();
+  res.json({ ok: true });
 });
 
 // ═══════════════════════════════════════════════
